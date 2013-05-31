@@ -54,15 +54,19 @@ type 'a kdtree = { N: int, P: RTensor.tensor, T: kdtree' }
 
 exception Point
 
-fun onepoint (N,P) i = RTensorSlice.fromto ([0,i],[N-1,i],P)
+fun onepoint (N,P) i = RTensorSlice.fromto ([i,0],[i,N-1],P)
 
 fun coord point = 
     let val base  = RTensorSlice.base point 
         val shape = RTensorSlice.shape point 
         val lo    = Range.first (RTensorSlice.range point)
+        val hi    = Range.last (RTensorSlice.range point)
     in
-        case (shape,lo) of
-            ([n,1],[0,p]) => (fn (i) => RTensor.sub(base,[i,p]))
+        case (shape,lo,hi) of
+            ([1,n],[p,0],[p',n']) => 
+            (if ((p=p') andalso (n=n'+1))
+             then (fn (i) => RTensor.sub(base,[p,i]))
+             else raise Point)
           | _ => raise Point
     end
 
@@ -167,7 +171,29 @@ fun subtrees {N,P,T} =
     end
 
 
-fun findFrom cmp (a,from) = IntArraySlice.find cmp (IntArraySlice.slice (a,from,NONE))
+fun isValid {N,P,T} =
+    case T of
+        KdLeaf _ => true
+      | KdNode {left,i,right,axis} =>
+        let
+            val onepoint' = onepoint (N,P)
+            val x = coord (onepoint' i) axis 
+            val leftValid = (List.all (fn y => Real.< (coord y axis, x))
+                                      (toList {N=N,P=P,T=left}))
+            val rightValid = (List.all (fn y => Real.>= (coord y axis, x))
+                                       (toList {N=N,P=P,T=right}))
+        in
+            leftValid andalso rightValid
+        end
+
+(* Checks whether the K-D tree property holds for the given tree and its subtreees *)
+
+fun allSubtreesAreValid (t as {N,P,T}) = 
+    List.all (fn (t') => isValid {N=N,P=P,T=t'}) (subtrees t)
+
+
+
+fun findiFromTo cmp (a,from,to) = IntArraySlice.findi cmp (IntArraySlice.slice (a,from,SOME (to-from)))
 
 
 (* Constructs a kd-tree from a tensor of points, starting with the given depth. *)
@@ -180,34 +206,43 @@ fun fromTensorWithDepth (N,P) depth =
 
         val sub        = Unsafe.IntArray.sub
 
+
         fun findMedian (I, m, n, depth) =
             let 
+                fun findGreaterCoord (ci,cc,to,axis) =
+                    findiFromTo 
+                        (fn (i,x) => 
+                            let 
+                                val px = onepoint' (sub (I, x))
+                                val cx = coord px axis
+                            in
+                                Real.< (cc, cx)
+                            end)
+                        (I,ci,to)
+
                 val axis   = Int.mod (depth, N)
+
                 val _      = IntArraySort.sortRange
-                                 (fn (x,y) => let val px = onepoint' x
-                                                  val py = onepoint' y
-                                              in
-                                                  Real.compare (coord px axis, coord py axis)
-                                              end)
-                                 (I,(m,n))
+                                 (fn (x,y) => 
+                                     let 
+                                         val px = onepoint' x
+                                         val py = onepoint' y
+                                         val cx = coord px axis
+                                         val cy = coord py axis
+                                     in
+                                         Real.compare (cx, cy)
+                                     end)
+                                 (I,(m,n+1))
 
                 val median   = m+(Int.quot (n-m,2))
-                val mediani  = sub (I,median)
-                val medianp  = onepoint' mediani
-                val medianc  = coord medianp axis
-
-                val median' = findFrom 
-                                  (fn (x) => 
-                                      let val px = onepoint' (sub (I, x))
-                                      in
-                                          Real.< (medianc, coord px axis)
-                                      end)
-                                  (I,median)
+                val medianc  = coord (onepoint' (sub (I,median))) axis
+                val median'  = findGreaterCoord (median,medianc,n,axis)
                               
 	    in 
                 case median' of
-                    NONE => (I,m)
-                  | SOME i => (I,i)
+                    SOME (i,_) => SOME (I,median+i)
+                  | NONE => NONE
+                    
             end
 
 
@@ -217,19 +252,31 @@ fun fromTensorWithDepth (N,P) depth =
              in
                  if (k <= bucketSize) orelse (k <= 1)
                  then 
-                     KdLeaf {ii=IntVector.map
-                                    (fn i => sub(I,i))
-                                    (IntArraySlice.vector (IntArraySlice.slice (I, m, SOME n))), 
-                             axis=Int.mod (depth, N)}
+                     let
+                         val ii  = IntArraySlice.vector (IntArraySlice.slice (I, m, SOME k))
+                     in
+                         KdLeaf {ii=ii, axis=Int.mod (depth, N)}
+                     end
                  else 
                      (let 
+                          val axis        = Int.mod (depth, N)
                           val depth'      = depth+1
-                          val (I',median) = findMedian (I,m,n,depth)
+                          val mmedian     = findMedian (I,m,n,depth)
                       in
-                          KdNode {left=fromTensorWithDepth' (I',m,median,depth'),
-                                  i=sub(I',median), 
-                                  right=fromTensorWithDepth' (I',median+1,n,depth'),
-                                  axis=Int.mod (depth, N)}
+                          case mmedian of
+                              SOME (I',median) =>
+                              (let
+                                   val x = coord (onepoint' (sub (I',median))) axis 
+                                                                                                                                        
+                                   val left  = fromTensorWithDepth' (I',m,median-1,depth')
+                                   val right = fromTensorWithDepth' (I',median+1,n,depth')
+
+                                           
+                               in
+                                   KdNode {left=left,i=sub(I',median),right=right,axis=axis}
+                               end)
+                            | NONE => (KdLeaf {ii=IntArraySlice.vector (IntArraySlice.slice (I, m, SOME k)),  
+                                               axis=Int.mod (depth, N)})
                       end)
              end)
 
@@ -238,5 +285,8 @@ fun fromTensorWithDepth (N,P) depth =
         then KdLeaf {ii=IntVector.fromList [], axis=Int.mod (depth, N)}
         else fromTensorWithDepth' (IntArray.tabulate (sz, fn i => i), 0, sz-1, depth)
     end
+    
+    fun fromTensor (N,P) = {N=N,P=P,T=(fromTensorWithDepth (N,P) 0)}
+
 
 end
