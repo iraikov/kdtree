@@ -42,7 +42,7 @@
 
 
 functor KDTreeFn (val N : int
-                    val dist2 : Real64Array.array * Real64Array.array -> real) = 
+                  val distanceSquared : RTensor.tensor * RTensor.tensor -> real) = 
 struct
 
 structure IntArraySort = ArrayMergeSortFn (IntArray)
@@ -287,7 +287,7 @@ fun fromTensorWithDepth P depth =
     
    fun fromTensor P = {P=P,T=(fromTensorWithDepth P 0)}
 
-   fun comparePoints (a,b) = Real.compare (dist2 a, dist2 b)
+   fun comparePoints (a,b) = Real.compare (distanceSquared a, distanceSquared b)
 
    (* Returns the index of the nearest neighbor of p in tree t. *)
 
@@ -307,7 +307,7 @@ fun fromTensorWithDepth P depth =
                        let
                            val delta = Real.- (xprobe, xp)
                        in
-                           Real.< (Real.* (delta,delta), dist2 (probe, hd candidates'))
+                           Real.< (Real.* (delta,delta), distanceSquared (probe, hd candidates'))
                        end
 
                    val candidates'' = if sphereIntersectsPlane
