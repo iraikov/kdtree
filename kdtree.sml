@@ -41,7 +41,8 @@
 *)
 
 
-structure KDTree = 
+functor KDTreeFn (val N : int
+                    val dist2 : Real64Array.array * Real64Array.array -> real) = 
 struct
 
 structure IntArraySort = ArrayMergeSortFn (IntArray)
@@ -50,11 +51,11 @@ datatype kdtree' =
          KdNode of { left: kdtree', i: int, right: kdtree', axis: int }
        | KdLeaf of { ii: IntVector.vector, axis: int }
 
-type 'a kdtree = { N: int, P: RTensor.tensor, T: kdtree' }
+type 'a kdtree = { P: RTensor.tensor, T: kdtree' }
 
 exception Point
 
-fun onepoint (N,P) i = RTensorSlice.fromto ([i,0],[i,N-1],P)
+fun point P i = RTensorSlice.fromto ([i,0],[i,N-1],P)
 
 fun coord point = 
     let val base  = RTensorSlice.base point 
@@ -70,16 +71,18 @@ fun coord point =
           | _ => raise Point
     end
 
+fun pointCoord P (i,c) = RTensor.sub (P,[i,c])
 
-fun empty {N,P,T} =
+
+fun empty {P,T} =
     case T of
         KdNode _         => false
       | KdLeaf {ii,axis} => (IntVector.length ii)=0
 
 
-fun app f {N,P,T} =
+fun app f {P,T} =
     let
-        val p = onepoint (N,P)
+        val p = point P
         fun app' T =
             case T of 
                 KdNode {left,i,right,axis} => (app' left; f (p i); app' right)
@@ -89,9 +92,9 @@ fun app f {N,P,T} =
     end
 
 
-fun appi f {N,P,T} =
+fun appi f {P,T} =
     let
-        val p = onepoint (N,P)
+        val p = point P
         fun appi' T =
             case T of 
                 KdNode {left,i,right,axis} => (appi' left; f (i, p i); appi' right)
@@ -101,9 +104,9 @@ fun appi f {N,P,T} =
     end
 
 
-fun foldl f init {N,P,T} =
+fun foldl f init {P,T} =
     let
-        val p = onepoint (N,P)
+        val p = point P
         fun foldl' init T =
             case T of 
                 KdNode {left,i,right,axis} => (let val init' = foldl' init left
@@ -115,9 +118,9 @@ fun foldl f init {N,P,T} =
     end
 
 
-fun foldli f init {N,P,T} =
+fun foldli f init {P,T} =
     let
-        val p = onepoint (N,P)
+        val p = point P
         fun foldli' init T =
             case T of 
                 KdNode {left,i,right,axis} => (let val init' = foldli' init left
@@ -129,9 +132,9 @@ fun foldli f init {N,P,T} =
     end
                                           
 
-fun foldr f init {N,P,T} =
+fun foldr f init {P,T} =
     let
-        val p = onepoint (N,P)
+        val p = point P
         fun foldr' init T =
             case T of 
                 KdNode {left,i,right,axis} => (let val init' = foldr' init right
@@ -143,9 +146,9 @@ fun foldr f init {N,P,T} =
     end
 
 
-fun foldri f init {N,P,T} =
+fun foldri f init {P,T} =
     let
-        val p = onepoint (N,P)
+        val p = point P
         fun foldri' init T =
             case T of 
                 KdNode {left,i,right,axis} => (let val init'  = foldri' init right
@@ -160,7 +163,7 @@ fun foldri f init {N,P,T} =
 fun toList t = foldr (op ::) [] t
 
 
-fun subtrees {N,P,T} =
+fun subtrees {P,T} =
     let
         fun subtrees' T = 
             case T of 
@@ -171,25 +174,24 @@ fun subtrees {N,P,T} =
     end
 
 
-fun isValid {N,P,T} =
+fun isValid {P,T} =
     case T of
         KdLeaf _ => true
       | KdNode {left,i,right,axis} =>
         let
-            val onepoint' = onepoint (N,P)
-            val x = coord (onepoint' i) axis 
+            val x = pointCoord P (i, axis)
             val leftValid = (List.all (fn y => Real.< (coord y axis, x))
-                                      (toList {N=N,P=P,T=left}))
+                                      (toList {P=P,T=left}))
             val rightValid = (List.all (fn y => Real.>= (coord y axis, x))
-                                       (toList {N=N,P=P,T=right}))
+                                       (toList {P=P,T=right}))
         in
             leftValid andalso rightValid
         end
 
 (* Checks whether the K-D tree property holds for the given tree and its subtreees *)
 
-fun allSubtreesAreValid (t as {N,P,T}) = 
-    List.all (fn (t') => isValid {N=N,P=P,T=t'}) (subtrees t)
+fun allSubtreesAreValid (t as {P,T}) = 
+    List.all (fn (t') => isValid {P=P,T=t'}) (subtrees t)
 
 
 
@@ -198,9 +200,9 @@ fun findiFromTo cmp (a,from,to) = IntArraySlice.findi cmp (IntArraySlice.slice (
 
 (* Constructs a kd-tree from a tensor of points, starting with the given depth. *)
 
-fun fromTensorWithDepth (N,P) depth =
+fun fromTensorWithDepth P depth =
     let 
-        val onepoint'  = onepoint (N,P)
+        val pointCoord'  = pointCoord P
         val [sz,_]     = RTensor.shape P
         val bucketSize = 10 * (Int.max (Real.ceil (Math.log10 (Real.fromInt sz)),  1))
 
@@ -213,8 +215,7 @@ fun fromTensorWithDepth (N,P) depth =
                     findiFromTo 
                         (fn (i,x) => 
                             let 
-                                val px = onepoint' (sub (I, x))
-                                val cx = coord px axis
+                                val cx = pointCoord' (sub (I, x), axis)
                             in
                                 Real.< (cc, cx)
                             end)
@@ -225,17 +226,15 @@ fun fromTensorWithDepth (N,P) depth =
                 val _      = IntArraySort.sortRange
                                  (fn (x,y) => 
                                      let 
-                                         val px = onepoint' x
-                                         val py = onepoint' y
-                                         val cx = coord px axis
-                                         val cy = coord py axis
+                                         val cx = pointCoord' (x, axis)
+                                         val cy = pointCoord' (y, axis)
                                      in
                                          Real.compare (cx, cy)
                                      end)
                                  (I,(m,n+1))
 
                 val median   = m+(Int.quot (n-m,2))
-                val medianc  = coord (onepoint' (sub (I,median))) axis
+                val medianc  = pointCoord' (sub (I,median), axis)
                 val median'  = findGreaterCoord (median,medianc,n,axis)
                               
 	    in 
@@ -266,7 +265,7 @@ fun fromTensorWithDepth (N,P) depth =
                           case mmedian of
                               SOME (I',median) =>
                               (let
-                                   val x = coord (onepoint' (sub (I',median))) axis 
+                                   val x = pointCoord' (sub (I',median), axis)
                                                                                                                                         
                                    val left  = fromTensorWithDepth' (I',m,median-1,depth')
                                    val right = fromTensorWithDepth' (I',median+1,n,depth')
@@ -286,7 +285,57 @@ fun fromTensorWithDepth (N,P) depth =
         else fromTensorWithDepth' (IntArray.tabulate (sz, fn i => i), 0, sz-1, depth)
     end
     
-    fun fromTensor (N,P) = {N=N,P=P,T=(fromTensorWithDepth (N,P) 0)}
+   fun fromTensor P = {P=P,T=(fromTensorWithDepth P 0)}
 
+   fun comparePoints (a,b) = Real.compare (dist2 a, dist2 b)
+
+   (* Returns the index of the nearest neighbor of p in tree t. *)
+
+   fun nearestNeighbor {P,T} p =
+
+       let
+           val pointCoord' = pointCoord P
+
+           fun findNearest (t1,t2,p,probe,xp,xprobe) =
+               let
+                   val candidates' = 
+                       case nearestNeighbor' t1 probe of
+                           SOME best => [best,p]
+                         | NONE      => [p]
+
+                   val sphereIntersectsPlane = 
+                       let
+                           val delta = Real.- (xprobe, xp)
+                       in
+                           Real.< (Real.* (delta,delta), dist2 (probe, hd candidates'))
+                       end
+
+                   val candidates'' = if sphereIntersectsPlane
+                                      then (case nearestNeighbor' t2 probe of
+                                                SOME nn => candidates' @ [nn]
+                                              | NONE => candidates')
+                                      else candidates'
+                       
+               in
+                   minimumBy candidates'' comparePoints
+               end
+
+           and nearestNeighbor' t probe =
+               case t of
+                   KdLeaf { ii, axis } => 
+                   vMinimumBy ii comparePoints
+                   
+                 | KdNode { left, i, right, axis } => 
+                   let 
+                       val xprobe = RTensor.sub (probe,[0,axis])
+                       val xp     = pointCoord' (i,axis)
+                   in
+                       if Real.< (xprobe, xp)
+                       then findNearest (left, right, i, probe, xp, xprobe)
+                       else findNearest (right, left, i, probe, xp, xprobe)
+                   end
+       in
+           nearestNeighbor' T
+       end
 
 end
