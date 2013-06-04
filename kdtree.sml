@@ -74,6 +74,20 @@ fun coord point =
 fun pointCoord P (i,c) = RTensor.sub (P,[i,c])
 
 
+fun minimumBy lst cmpfn =
+    let
+        fun recur [] m   = SOME m
+          | recur h::t m = case cmpfn (h,m) of
+                               LESS => recur t h
+                             | _    => recur t m
+    in
+        case lst of
+            x::t  => recur t x1
+          | []    => NONE
+    end
+
+
+
 fun empty {P,T} =
     case T of
         KdNode _         => false
