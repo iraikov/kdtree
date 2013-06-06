@@ -42,7 +42,7 @@
 
 
 functor KDTreeFn (val N : int
-                  val distanceSquared : RTensor.tensor * RTensor.tensor -> real) = 
+                  val distanceSquared : (real list) * (real list) -> real) = 
 struct
 
 structure IntArraySort = ArrayMergeSortFn (IntArray)
@@ -56,6 +56,8 @@ type 'a kdtree = { P: RTensor.tensor, T: kdtree' }
 exception Point
 
 fun point P i = RTensorSlice.fromto ([i,0],[i,N-1],P)
+
+fun pointList p = List.rev (RTensorSlice.foldl (op ::) [] p)
 
 fun coord point = 
     let val base  = RTensorSlice.base point 
@@ -71,19 +73,33 @@ fun coord point =
           | _ => raise Point
     end
 
+
 fun pointCoord P (i,c) = RTensor.sub (P,[i,c])
 
 
-fun minimumBy lst cmpfn =
-    let
-        fun recur [] m   = SOME m
-          | recur h::t m = case cmpfn (h,m) of
-                               LESS => recur t h
-                             | _    => recur t m
+fun compareDistance reltol probe (a,b) = 
+    let 
+        val probe' = pointList probe
+        val delta  = Real.- (distanceSquared (probe', pointList a), distanceSquared (probe', pointList b))
     in
-        case lst of
-            x::t  => recur t x1
-          | []    => NONE
+        case reltol of
+            NONE   => (if Real.< (delta, 0.0) then LESS else GREATER)
+          | SOME r => (if Real.< (delta, Real.*(r,r))
+                       then EQUAL
+                       else (if Real.< (delta, 0.0) then LESS else GREATER))
+    end
+
+
+
+fun minimumBy v cmpfn: int option =
+    let
+        fun recur 0 m   = m
+          | recur i m = case cmpfn (IntVector.sub (v,i),m) of
+                            LESS => recur (i-1) i
+                          | _    => recur (i-1) m
+        val n = IntVector.length v
+    in
+        if n = 0 then NONE else SOME (recur (n-2) (IntVector.sub (v,n-1)))
     end
 
 
@@ -301,43 +317,50 @@ fun fromTensorWithDepth P depth =
     
    fun fromTensor P = {P=P,T=(fromTensorWithDepth P 0)}
 
-   fun comparePoints (a,b) = Real.compare (distanceSquared a, distanceSquared b)
-
    (* Returns the index of the nearest neighbor of p in tree t. *)
 
-   fun nearestNeighbor {P,T} p =
+   fun nearestNeighbor {P,T} probe =
 
        let
+           val probe'      = RTensorSlice.fromto ([0,0],[0,N-1],probe)
+           val point'      = point P
            val pointCoord' = pointCoord P
+           val compareDistance' = compareDistance NONE probe'
 
-           fun findNearest (t1,t2,p,probe,xp,xprobe) =
+           fun compareDistance'' (i,j) =
+               compareDistance' (point' i, point' j)
+
+           fun findNearest (t1,t2,p,xp,xprobe) =
                let
                    val candidates' = 
-                       case nearestNeighbor' t1 probe of
+                       case nearestNeighbor' t1 of
                            SOME best => [best,p]
                          | NONE      => [p]
 
                    val sphereIntersectsPlane = 
                        let
                            val delta = Real.- (xprobe, xp)
+                           val candidate = point' (hd candidates')
                        in
-                           Real.< (Real.* (delta,delta), distanceSquared (probe, hd candidates'))
+                           Real.< (Real.* (delta,delta), 
+                                   distanceSquared (pointList probe', pointList candidate))
                        end
 
                    val candidates'' = if sphereIntersectsPlane
-                                      then (case nearestNeighbor' t2 probe of
+                                      then (case nearestNeighbor' t2 of
                                                 SOME nn => candidates' @ [nn]
                                               | NONE => candidates')
                                       else candidates'
                        
                in
-                   minimumBy candidates'' comparePoints
+                   minimumBy (IntVector.fromList candidates'') compareDistance''
                end
 
-           and nearestNeighbor' t probe =
+           and nearestNeighbor' t =
                case t of
+
                    KdLeaf { ii, axis } => 
-                   vMinimumBy ii comparePoints
+                   minimumBy ii compareDistance''
                    
                  | KdNode { left, i, right, axis } => 
                    let 
@@ -345,8 +368,8 @@ fun fromTensorWithDepth P depth =
                        val xp     = pointCoord' (i,axis)
                    in
                        if Real.< (xprobe, xp)
-                       then findNearest (left, right, i, probe, xp, xprobe)
-                       else findNearest (right, left, i, probe, xp, xprobe)
+                       then findNearest (left, right, i, xp, xprobe)
+                       else findNearest (right, left, i, xp, xprobe)
                    end
        in
            nearestNeighbor' T
