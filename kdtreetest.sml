@@ -19,6 +19,7 @@ structure KDTree = KDTreeFn (val N = 3
 functor KdTreeTestFn (val distance : (real list) * (real list) -> real) =
 struct
 
+
    fun sortPoints (origin,pts) =
        ListMergeSort.sort
            (fn (x,y) => Real.> (distance (origin,x), distance (origin,y)))
@@ -31,9 +32,8 @@ struct
         if not (KDTree.allSubtreesAreValid t) then raise Fail "invalid subtree of a KDTree" else ())
 
 
-   fun testNearestNeighbor (pts,t as {P,T},x) =
+   fun testNearestNeighbor (sorted,t as {P,T},x) =
        let
-           val sorted = sortPoints (x,pts)
            val nn = valOf (KDTree.nearestNeighbor t x)
            val nn' = [RTensor.sub (P, [nn,0]),
                       RTensor.sub (P, [nn,1]),
@@ -47,6 +47,24 @@ struct
        in
            if not (ListPair.all (fn (x,y) => Real.>= (1E~16, Real.- (x,y) )) (nn', (hd sorted)))
            then raise Fail "nearestNeighbor" else ()
+       end
+       
+
+   fun testNearNeighbors (sorted,t as {P,T},x,r) =
+       let
+           val nns  = KDTree.nearNeighbors t r x
+           val nns' = sortPoints (x, List.map (fn (nn) => [RTensor.sub (P, [nn,0]),
+                                                           RTensor.sub (P, [nn,1]),
+                                                           RTensor.sub (P, [nn,2])])
+                                              nns)
+           val (sss,_) = List.partition (fn (p) => Real.<= (distance3D (p,x), r))
+                                        sorted
+       in
+           
+           if not (ListPair.all
+                       (fn (nn,ss) => (ListPair.all (fn (x,y) => Real.>= (1E~16, Real.- (x,y) )) (nn,ss)))
+                       (nns', sss))
+           then raise Fail "nearNeighbors" else ()
        end
        
 
@@ -69,8 +87,13 @@ structure KdTreeTest = KdTreeTestFn (val distance = distance3D)
 
 val N  = 3
 
-val M = 100000
+val M  = 1000000
 val P  = realRandomTensor (13,17) [M,N]
+
+fun sortPoints distance (origin,pts) =
+    ListMergeSort.sort
+        (fn (x,y) => Real.> (distance (origin,x), distance (origin,y)))
+        pts
 
 val pts = let 
              fun recur (i, lst) =
@@ -84,7 +107,7 @@ val pts = let
               recur (0, [])
           end
 
-(*val _ = (print "P = "; TensorFile.realTensorWrite (TextIO.stdOut) P)*)
+
 
 val t  = KDTree.fromTensor P
 
@@ -109,9 +132,14 @@ val _  = let  fun recur (i) =
                         val x  = [Real.+ (0.1, RTensor.sub (P, [xi,0])),
                                   Real.- (RTensor.sub (P, [xi,1]), 0.1),
                                   Real.+ (0.1, RTensor.sub (P, [xi,2]))]
+                                 
+                        val sorted = sortPoints distance3D (x,pts)
                     in 
-                        KdTreeTest.testNearestNeighbor (pts,t,x);
+                        print ("test trial " ^ (Int.toString i) ^ "\n");
+                        KdTreeTest.testNearestNeighbor (sorted,t,x);
                         print "nearest neighbor check passed\n";
+                        KdTreeTest.testNearNeighbors (sorted,t,x,0.3);
+                        print "near neighbors check passed\n";
                         recur (i-1)
                     end)
                else ()

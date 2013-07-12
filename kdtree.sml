@@ -54,6 +54,7 @@ datatype kdtree' =
 type 'a kdtree = { P: RTensor.tensor, T: kdtree' }
 
 exception Point
+exception IndexArray
 
 fun point P i = RTensorSlice.fromto ([i,0],[i,N-1],P)
 
@@ -79,19 +80,7 @@ fun pointCoord P (i,c) = RTensor.sub (P,[i,c])
 
 fun compareDistance reltol probe (a,b) = 
     let
-(*
-        val _ = (print "compareDistance: probe = " ; TensorFile.realListLineWrite TextIO.stdOut probe)
-        val _ = (print "compareDistance: a = " ; TensorFile.realListLineWrite TextIO.stdOut (pointList a))
-        val _ = (print "compareDistance: b = " ; TensorFile.realListLineWrite TextIO.stdOut (pointList b))
-
-        val _ = (print ("compareDistance: dist^2(probe,a) = " ^ (Real.toString (distanceSquared (probe, pointList a))) ^ "\n"))
-        val _ = (print ("compareDistance: dist^2(probe,b) = " ^ (Real.toString (distanceSquared (probe, pointList b))) ^ "\n"))
-*)
         val delta  = Real.- (distanceSquared (probe, pointList a), distanceSquared (probe, pointList b))
-(*
-        val _ = print ("compareDistance: delta = " ^ (Real.toString delta) ^ "\n")
-*)
-                   
     in
         case reltol of
             NONE   => (if Real.< (delta, 0.0) then LESS else GREATER)
@@ -117,12 +106,16 @@ fun minimumBy v cmpfn: int option =
         if n = 0 then NONE else SOME (recur (n-1) (IntVector.sub (v,n-1)))
     end
 
+fun filterIntVector v ffn: int list =
+    IntVector.foldl (fn (i,ax) => if (ffn i) then i::ax else ax) [] v
 
-
-fun empty {P,T} =
+fun empty' T =
     case T of
         KdNode _         => false
       | KdLeaf {ii,axis} => (IntVector.length ii)=0
+    
+
+fun empty {P,T} = empty' T
 
 
 fun app f {P,T} =
@@ -225,9 +218,9 @@ fun isValid {P,T} =
         KdLeaf _ => true
       | KdNode {left,i,right,axis} =>
         let
-            val x = pointCoord P (i, axis)
-            val leftValid = (List.all (fn y => Real.< (coord y axis, x))
-                                      (toList {P=P,T=left}))
+            val x          = pointCoord P (i, axis)
+            val leftValid  = (List.all (fn y => Real.< (coord y axis, x))
+                                       (toList {P=P,T=left}))
             val rightValid = (List.all (fn y => Real.>= (coord y axis, x))
                                        (toList {P=P,T=right}))
         in
@@ -244,15 +237,16 @@ fun allSubtreesAreValid (t as {P,T}) =
 fun findiFromTo cmp (a,from,to) = IntArraySlice.findi cmp (IntArraySlice.slice (a,from,SOME (to-from+1)))
 
 
-(* Constructs a kd-tree from a tensor of points, starting with the given depth. *)
+(* Constructs a kd-tree from a tensor of points, starting with the given depth. 
+   If I is given, then only use the point indices contained in it, otherwise use all points. *)
 
-fun fromTensorWithDepth P depth =
+fun fromTensorWithDepth P I depth =
     let 
         val pointCoord'  = pointCoord P
-        val [sz,_]     = RTensor.shape P
-        val bucketSize = 10 * (Int.max (Real.ceil (Math.log10 (Real.fromInt sz)),  1))
+        val [sz,_]       = RTensor.shape P
+        val bucketSize   = 10 * (Int.max (Real.ceil (Math.log10 (Real.fromInt sz)),  1))
 
-        val sub        = Unsafe.IntArray.sub
+        val sub          = Unsafe.IntArray.sub
 
         fun findMedian (I, m, n, depth) =
             let 
@@ -327,10 +321,14 @@ fun fromTensorWithDepth P depth =
     in
         if sz=0 
         then KdLeaf {ii=IntVector.fromList [], axis=Int.mod (depth, N)}
-        else fromTensorWithDepth' (IntArray.tabulate (sz, fn i => i), 0, sz-1, depth)
+        else (case I of NONE => fromTensorWithDepth' (IntArray.tabulate (sz, fn i => i), 0, sz-1, depth)
+                      | SOME I' => if (IntVector.length I') <= sz 
+                                   then fromTensorWithDepth' (I', depth)
+                                   else raise IndexVector)
     end
     
-   fun fromTensor P = {P=P,T=(fromTensorWithDepth P 0)}
+   fun fromTensor P = {P=P,T=(fromTensorWithDepth P NONE 0)}
+
 
    (* Returns the index of the nearest neighbor of p in tree t. *)
 
@@ -390,5 +388,88 @@ fun fromTensorWithDepth P depth =
        in
            nearestNeighbor' T
        end
+
+
+   (* Returns all neighbors within distance r from p in tree t. *)
+   fun nearNeighbors {P,T} radius probe =
+       let
+           val point'      = point P
+           val pointCoord' = pointCoord P
+           val r2          = Real.* (radius, radius)
+           fun filterIndices ii = filterIntVector ii (fn (i) => (Real.<= (distanceSquared (probe, pointList (point' i)), r2)))
+
+           fun nearNeighbors' t =
+               case t of
+                   
+                   KdLeaf { ii, axis } => filterIndices ii
+                                      
+	         | KdNode { left, i, right, axis } =>
+                   
+	           (let 
+                        val maybePivot = filterIndices (IntVector.fromList [i])
+	            in
+		        if (empty' left) andalso (empty' right)
+                        then maybePivot
+                        else 
+		            (let 
+                                 val xprobe = List.nth (probe,axis)
+                                 val xp     = pointCoord' (i, axis)
+                             in
+			         if (Real.<= (xprobe, xp))
+                                 then
+			             (let 
+                                          val nearest = maybePivot @ (nearNeighbors' left)
+                                      in
+				          (if Real.> (Real.+ (xprobe, (Real.abs radius)), xp)
+                                           then (nearNeighbors' right) @ nearest
+				           else nearest)
+                                      end)
+                                 else
+			             (let 
+                                          val nearest = maybePivot @ (nearNeighbors' right)
+                                      in
+				          if Real.< (Real.- (xprobe, (Real.abs radius)), xp)
+                                          then (nearNeighbors' left) @ nearest
+                                          else nearest
+                                      end)
+                             end)
+                    end)
+       in
+           nearNeighbors' T
+       end
+  
+  (* Removes the point p from t. *)
+   fun remove  {P,T} tol pkill =
+
+       let
+           val point'      = point P
+           val pointCoord' = pointCoord P
+           val tol2    = Real.* (tol, tol)
+           fun filterIndices ii = filterIntVector ii (fn (i) => (Real.> (distanceSquared (pkill, pointList (point' i)), tol2)))
+
+	   fun remove' t =
+               case t of
+                   
+                   KdLeaf { ii, axis } => KdLeaf { ii = IntVector.fromList (filterIndices ii), axis = axis }
+                                      
+	         | KdNode { left, i, right, axis } =>
+                   if (Real.> (distanceSquared (pkill, pointList (point' i)), tol2))
+                   then 
+                       (let
+                            val I = IntArray.fromList ((toList left) @ (toList right))
+                        in
+                            fromTensorWithDepth P I axis
+                        end)
+                   else
+		       (if (Real.< (List.nth (pkill,axis), pointCoord' (i, axis)))
+                        then 
+                            KdNode { left = remove' left, i=i, right=right, axis=axis }
+                        else 
+                            KdNode { left = left, i=i, right=remove' right, axis=axis })
+       in
+           remove' T
+       end
+                            
+
 
 end
