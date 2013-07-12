@@ -78,28 +78,43 @@ fun pointCoord P (i,c) = RTensor.sub (P,[i,c])
 
 
 fun compareDistance reltol probe (a,b) = 
-    let 
-        val probe' = pointList probe
-        val delta  = Real.- (distanceSquared (probe', pointList a), distanceSquared (probe', pointList b))
+    let
+(*
+        val _ = (print "compareDistance: probe = " ; TensorFile.realListLineWrite TextIO.stdOut probe)
+        val _ = (print "compareDistance: a = " ; TensorFile.realListLineWrite TextIO.stdOut (pointList a))
+        val _ = (print "compareDistance: b = " ; TensorFile.realListLineWrite TextIO.stdOut (pointList b))
+
+        val _ = (print ("compareDistance: dist^2(probe,a) = " ^ (Real.toString (distanceSquared (probe, pointList a))) ^ "\n"))
+        val _ = (print ("compareDistance: dist^2(probe,b) = " ^ (Real.toString (distanceSquared (probe, pointList b))) ^ "\n"))
+*)
+        val delta  = Real.- (distanceSquared (probe, pointList a), distanceSquared (probe, pointList b))
+(*
+        val _ = print ("compareDistance: delta = " ^ (Real.toString delta) ^ "\n")
+*)
+                   
     in
         case reltol of
             NONE   => (if Real.< (delta, 0.0) then LESS else GREATER)
-          | SOME r => (if Real.< (delta, Real.*(r,r))
+          | SOME r => (if Real.< (Real.* (delta,delta), r)
                        then EQUAL
-                       else (if Real.< (delta, 0.0) then LESS else GREATER))
+                       else (if Real.< (delta, 0.0) 
+                             then LESS else (if Real.> (delta, 0.0) then GREATER else EQUAL)))
     end
 
 
 
 fun minimumBy v cmpfn: int option =
     let
-        fun recur 0 m   = m
-          | recur i m = case cmpfn (IntVector.sub (v,i),m) of
-                            LESS => recur (i-1) i
-                          | _    => recur (i-1) m
+        fun recur 0 m = m
+          | recur i m = (let val i' = IntVector.sub (v,i-1)
+                             val r  = cmpfn (i',m) 
+                         in 
+                          (case r of LESS => recur (i-1) i'
+                                   | _    => recur (i-1) m )
+                         end)
         val n = IntVector.length v
     in
-        if n = 0 then NONE else SOME (recur (n-2) (IntVector.sub (v,n-1)))
+        if n = 0 then NONE else SOME (recur (n-1) (IntVector.sub (v,n-1)))
     end
 
 
@@ -188,7 +203,8 @@ fun foldri f init {P,T} =
     in
         foldri' init T
     end
-                                        
+
+fun size {P,T} = hd (RTensor.shape P)
 
 fun toList t = foldr (op ::) [] t
 
@@ -225,7 +241,7 @@ fun allSubtreesAreValid (t as {P,T}) =
 
 
 
-fun findiFromTo cmp (a,from,to) = IntArraySlice.findi cmp (IntArraySlice.slice (a,from,SOME (to-from)))
+fun findiFromTo cmp (a,from,to) = IntArraySlice.findi cmp (IntArraySlice.slice (a,from,SOME (to-from+1)))
 
 
 (* Constructs a kd-tree from a tensor of points, starting with the given depth. *)
@@ -237,7 +253,6 @@ fun fromTensorWithDepth P depth =
         val bucketSize = 10 * (Int.max (Real.ceil (Math.log10 (Real.fromInt sz)),  1))
 
         val sub        = Unsafe.IntArray.sub
-
 
         fun findMedian (I, m, n, depth) =
             let 
@@ -282,7 +297,7 @@ fun fromTensorWithDepth P depth =
                  if (k <= bucketSize) orelse (k <= 1)
                  then 
                      let
-                         val ii  = IntArraySlice.vector (IntArraySlice.slice (I, m, SOME k))
+                         val ii  = IntArraySlice.vector (IntArraySlice.slice (I, m, SOME (k+1)))
                      in
                          KdLeaf {ii=ii, axis=Int.mod (depth, N)}
                      end
@@ -304,7 +319,7 @@ fun fromTensorWithDepth P depth =
                                in
                                    KdNode {left=left,i=sub(I',median),right=right,axis=axis}
                                end)
-                            | NONE => (KdLeaf {ii=IntArraySlice.vector (IntArraySlice.slice (I, m, SOME k)),  
+                            | NONE => (KdLeaf {ii=IntArraySlice.vector (IntArraySlice.slice (I, m, SOME (k+1))),  
                                                axis=Int.mod (depth, N)})
                       end)
              end)
@@ -322,10 +337,9 @@ fun fromTensorWithDepth P depth =
    fun nearestNeighbor {P,T} probe =
 
        let
-           val probe'      = RTensorSlice.fromto ([0,0],[0,N-1],probe)
            val point'      = point P
            val pointCoord' = pointCoord P
-           val compareDistance' = compareDistance NONE probe'
+           val compareDistance' = compareDistance (SOME 1E~16) probe
 
            fun compareDistance'' (i,j) =
                compareDistance' (point' i, point' j)
@@ -343,7 +357,7 @@ fun fromTensorWithDepth P depth =
                            val candidate = point' (hd candidates')
                        in
                            Real.< (Real.* (delta,delta), 
-                                   distanceSquared (pointList probe', pointList candidate))
+                                   distanceSquared (probe, pointList candidate))
                        end
 
                    val candidates'' = if sphereIntersectsPlane
@@ -351,7 +365,7 @@ fun fromTensorWithDepth P depth =
                                                 SOME nn => candidates' @ [nn]
                                               | NONE => candidates')
                                       else candidates'
-                       
+
                in
                    minimumBy (IntVector.fromList candidates'') compareDistance''
                end
@@ -364,12 +378,14 @@ fun fromTensorWithDepth P depth =
                    
                  | KdNode { left, i, right, axis } => 
                    let 
-                       val xprobe = RTensor.sub (probe,[0,axis])
+                       val xprobe = List.nth (probe,axis)
                        val xp     = pointCoord' (i,axis)
                    in
                        if Real.< (xprobe, xp)
                        then findNearest (left, right, i, xp, xprobe)
                        else findNearest (right, left, i, xp, xprobe)
+
+
                    end
        in
            nearestNeighbor' T
