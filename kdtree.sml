@@ -41,6 +41,56 @@
 *)
 
 
+structure IntVectorUtils =
+struct
+
+fun minimumBy v cmpfn: int option =
+    let
+        fun recur 0 m = m
+          | recur i m = (let val i' = IntVector.sub (v,i-1)
+                             val r  = cmpfn (i',m) 
+                         in 
+                          (case r of LESS => recur (i-1) i'
+                                   | _    => recur (i-1) m )
+                         end)
+        val n = IntVector.length v
+    in
+        if n = 0 then NONE else SOME (recur (n-1) (IntVector.sub (v,n-1)))
+    end
+
+fun filter v ffn: int list =
+    IntVector.foldl (fn (i,ax) => if (ffn i) then i::ax else ax) [] v
+
+fun toList v = 
+    IntVector.foldl (fn (i,ax) => i::ax) [] v
+
+
+end
+
+
+structure ListUtils =
+struct
+
+fun minimumBy lst cmpfn: int option =
+    let
+        fun recur [] m = m
+          | recur (i::rest) m = 
+            (let 
+                 val r  = cmpfn (i,m) 
+             in 
+                 (case r of LESS => recur (rest) i
+                          | _    => recur (rest) m )
+             end)
+    in
+        case lst of
+            [] => NONE 
+          | _  => SOME (recur (tl lst) (hd lst))
+    end
+
+
+end
+
+
 functor KDTreeFn (val N : int
                   val distanceSquared : (real list) * (real list) -> real) = 
 struct
@@ -91,23 +141,6 @@ fun compareDistance reltol probe (a,b) =
     end
 
 
-
-fun minimumBy v cmpfn: int option =
-    let
-        fun recur 0 m = m
-          | recur i m = (let val i' = IntVector.sub (v,i-1)
-                             val r  = cmpfn (i',m) 
-                         in 
-                          (case r of LESS => recur (i-1) i'
-                                   | _    => recur (i-1) m )
-                         end)
-        val n = IntVector.length v
-    in
-        if n = 0 then NONE else SOME (recur (n-1) (IntVector.sub (v,n-1)))
-    end
-
-fun filterIntVector v ffn: int list =
-    IntVector.foldl (fn (i,ax) => if (ffn i) then i::ax else ax) [] v
 
 fun empty' T =
     case T of
@@ -197,10 +230,25 @@ fun foldri f init {P,T} =
         foldri' init T
     end
 
+
+fun ifoldr f init {P,T} =
+    let
+        fun foldr' init T =
+            case T of 
+                KdNode {left,i,right,axis} => (let val init' = foldr' init right
+                                                   val init''= f (i, init')
+                                               in foldr' init'' left end)
+              | KdLeaf {ii,axis}           => IntVector.foldr (fn (i,ax) => f (i, ax)) init ii
+    in
+        foldr' init T
+    end
+
+
 fun size {P,T} = hd (RTensor.shape P)
 
 fun toList t = foldr (op ::) [] t
 
+fun toIndexList t = ifoldr (op ::) [] t
 
 fun subtrees {P,T} =
     let
@@ -322,9 +370,9 @@ fun fromTensorWithDepth P I depth =
         if sz=0 
         then KdLeaf {ii=IntVector.fromList [], axis=Int.mod (depth, N)}
         else (case I of NONE => fromTensorWithDepth' (IntArray.tabulate (sz, fn i => i), 0, sz-1, depth)
-                      | SOME I' => if (IntVector.length I') <= sz 
-                                   then fromTensorWithDepth' (I', depth)
-                                   else raise IndexVector)
+                      | SOME I' => if (IntArray.length I') <= sz 
+                                   then fromTensorWithDepth' (I', 0, sz-1, depth)
+                                   else raise IndexArray)
     end
     
    fun fromTensor P = {P=P,T=(fromTensorWithDepth P NONE 0)}
@@ -365,14 +413,14 @@ fun fromTensorWithDepth P I depth =
                                       else candidates'
 
                in
-                   minimumBy (IntVector.fromList candidates'') compareDistance''
+                   IntVectorUtils.minimumBy (IntVector.fromList candidates'') compareDistance''
                end
 
            and nearestNeighbor' t =
                case t of
 
                    KdLeaf { ii, axis } => 
-                   minimumBy ii compareDistance''
+                   IntVectorUtils.minimumBy ii compareDistance''
                    
                  | KdNode { left, i, right, axis } => 
                    let 
@@ -396,7 +444,8 @@ fun fromTensorWithDepth P I depth =
            val point'      = point P
            val pointCoord' = pointCoord P
            val r2          = Real.* (radius, radius)
-           fun filterIndices ii = filterIntVector ii (fn (i) => (Real.<= (distanceSquared (probe, pointList (point' i)), r2)))
+           fun filterIndices ii = IntVectorUtils.filter 
+                                      ii (fn (i) => (Real.<= (distanceSquared (probe, pointList (point' i)), r2)))
 
            fun nearNeighbors' t =
                case t of
@@ -444,21 +493,23 @@ fun fromTensorWithDepth P I depth =
        let
            val point'      = point P
            val pointCoord' = pointCoord P
-           val tol2    = Real.* (tol, tol)
-           fun filterIndices ii = filterIntVector ii (fn (i) => (Real.> (distanceSquared (pkill, pointList (point' i)), tol2)))
+           val tol2        = Real.* (tol, tol)
+           fun filterIndices ii = IntVectorUtils.filter 
+                                      ii (fn (i) => (Real.> (distanceSquared (pkill, pointList (point' i)), tol2)))
 
 	   fun remove' t =
                case t of
                    
-                   KdLeaf { ii, axis } => KdLeaf { ii = IntVector.fromList (filterIndices ii), axis = axis }
+                   KdLeaf { ii, axis } => 
+                   KdLeaf { ii = IntVector.fromList (filterIndices ii), axis = axis }
                                       
 	         | KdNode { left, i, right, axis } =>
                    if (Real.> (distanceSquared (pkill, pointList (point' i)), tol2))
                    then 
                        (let
-                            val I = IntArray.fromList ((toList left) @ (toList right))
+                            val I = IntArray.fromList ((toIndexList {P=P,T=left}) @ (toIndexList {P=P,T=right}))
                         in
-                            fromTensorWithDepth P I axis
+                            fromTensorWithDepth P (SOME I) axis
                         end)
                    else
 		       (if (Real.< (List.nth (pkill,axis), pointCoord' (i, axis)))
@@ -469,6 +520,56 @@ fun fromTensorWithDepth P I depth =
        in
            remove' T
        end
+  
+
+  (* Returns the k nearest points to p within tree. *)
+
+  fun kNearestNeighbors {P,T} k probe =
+      let
+          val point'      = point P
+                            
+          val compareDistance' = 
+              compareDistance (SOME 1E~16) probe
+
+          fun compareDistance'' (i,j) =
+              compareDistance' (point' i, point' j)
+              
+          fun kNearestNeighbors' t =
+              (case t of
+                  KdLeaf { ii, axis } => 
+                  (let
+                       fun recur (res, ii, k) =
+                           if ((k <= 0) orelse (List.null ii))
+                           then res
+                           else (let 
+                                     val nearest = valOf (ListUtils.minimumBy ii compareDistance'')
+                                 in
+                                     recur (nearest::res, List.filter (fn (i) => not (i = nearest)) ii, k-1)
+                                 end)
+                   in
+                       recur ([], IntVectorUtils.toList ii, k)
+                   end)
+                   
+	        | KdNode { left, i, right, axis } =>
+                  if (k <= 0) 
+                  then []
+                  else (let
+                            val nearest = nearestNeighbor {P=P,T=t} probe
+                        in
+                            case nearest of
+                                NONE => []
+                              | SOME n => 
+                                let
+                                    val t' = remove {P=P,T=t} 1E~16 (pointList (point' n))
+                                in
+                                    n :: (kNearestNeighbors {P=P,T=t'} (k - 1) probe)
+                                end
+                        end))
+      in
+          kNearestNeighbors' T
+      end
+                       
+
                             
 
 
