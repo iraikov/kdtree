@@ -90,9 +90,50 @@ fun minimumBy lst cmpfn: int option =
 
 end
 
+signature KDTREE = 
+sig
+
+type point
+type kdtree
+
+val empty: kdtree -> bool
+
+val app: (point -> unit) -> kdtree -> unit
+val appi: (int * point -> unit)  -> kdtree -> unit
+
+
+val foldl: ((point * 'a) -> 'a) -> 'a -> kdtree -> 'a
+val foldli: ((int * point * 'a) -> 'a) -> 'a -> kdtree -> 'a
+
+val foldr: ((point * 'a) -> 'a) -> 'a -> kdtree -> 'a
+val foldri: ((int * point * 'a) -> 'a) -> 'a -> kdtree -> 'a
+
+val ifoldr: ((int * 'a) -> 'a) -> 'a -> kdtree -> 'a
+
+val size: kdtree -> int
+
+val toList: kdtree -> point list
+
+val toIndexList: kdtree -> int list
+
+val isValid: kdtree -> bool
+
+val allSubtreesAreValid: kdtree -> bool
+
+val fromTensor: RTensor.tensor -> kdtree
+
+val nearestNeighbor: kdtree -> real list -> int option
+
+val nearNeighbors: kdtree -> real -> real list -> int list
+
+val remove: kdtree -> real -> real list -> kdtree
+
+val kNearestNeighbors: kdtree -> int -> real list -> int list
+
+end
 
 functor KDTreeFn (val N : int
-                  val distanceSquared : (real list) * (real list) -> real) = 
+                  val distanceSquared : (real list) * (real list) -> real): KDTREE = 
 struct
 
 structure IntArraySort = ArrayMergeSortFn (IntArray)
@@ -101,7 +142,9 @@ datatype kdtree' =
          KdNode of { left: kdtree', i: int, right: kdtree', axis: int }
        | KdLeaf of { ii: IntVector.vector, axis: int }
 
-type 'a kdtree = { P: RTensor.tensor, T: kdtree' }
+type kdtree = { P: RTensor.tensor, T: kdtree' }
+
+type point = RTensorSlice.slice
 
 exception Point
 exception IndexArray
@@ -518,7 +561,7 @@ fun fromTensorWithDepth P I depth =
                         else 
                             KdNode { left = left, i=i, right=remove' right, axis=axis })
        in
-           remove' T
+           { P=P, T=remove' T }
        end
   
 
@@ -560,7 +603,7 @@ fun fromTensorWithDepth P I depth =
                                 NONE => []
                               | SOME n => 
                                 let
-                                    val t' = remove {P=P,T=t} 1E~16 (pointList (point' n))
+                                    val {P=_, T=t'} = remove {P=P,T=t} 1E~16 (pointList (point' n))
                                 in
                                     n :: (kNearestNeighbors {P=P,T=t'} (k - 1) probe)
                                 end
