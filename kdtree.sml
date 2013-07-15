@@ -132,7 +132,7 @@ val kNearestNeighbors: kdtree -> int -> real list -> int list
 
 end
 
-functor KDTreeFn (val N : int
+functor KDTreeFn (val K : int
                   val distanceSquared : (real list) * (real list) -> real): KDTREE = 
 struct
 
@@ -149,7 +149,7 @@ type point = RTensorSlice.slice
 exception Point
 exception IndexArray
 
-fun point P i = RTensorSlice.fromto ([i,0],[i,N-1],P)
+fun point P i = RTensorSlice.fromto ([i,0],[i,K-1],P)
 
 fun pointList p = List.rev (RTensorSlice.foldl (op ::) [] p)
 
@@ -351,7 +351,7 @@ fun fromTensorWithDepth P I depth =
                             end)
                         (I,ci,to)
 
-                val axis   = Int.mod (depth, N)
+                val axis   = Int.mod (depth, K)
 
                 val _      = IntArraySort.sortRange
                                  (fn (x,y) => 
@@ -384,11 +384,11 @@ fun fromTensorWithDepth P I depth =
                      let
                          val ii  = IntArraySlice.vector (IntArraySlice.slice (I, m, SOME (k+1)))
                      in
-                         KdLeaf {ii=ii, axis=Int.mod (depth, N)}
+                         KdLeaf {ii=ii, axis=Int.mod (depth, K)}
                      end
                  else 
                      (let 
-                          val axis        = Int.mod (depth, N)
+                          val axis        = Int.mod (depth, K)
                           val depth'      = depth+1
                           val mmedian     = findMedian (I,m,n,depth)
                       in
@@ -405,13 +405,13 @@ fun fromTensorWithDepth P I depth =
                                    KdNode {left=left,i=sub(I',median),right=right,axis=axis}
                                end)
                             | NONE => (KdLeaf {ii=IntArraySlice.vector (IntArraySlice.slice (I, m, SOME (k+1))),  
-                                               axis=Int.mod (depth, N)})
+                                               axis=Int.mod (depth, K)})
                       end)
              end)
 
     in
         if sz=0 
-        then KdLeaf {ii=IntVector.fromList [], axis=Int.mod (depth, N)}
+        then KdLeaf {ii=IntVector.fromList [], axis=Int.mod (depth, K)}
         else (case I of NONE => fromTensorWithDepth' (IntArray.tabulate (sz, fn i => i), 0, sz-1, depth)
                       | SOME I' => if (IntArray.length I') <= sz 
                                    then fromTensorWithDepth' (I', 0, sz-1, depth)

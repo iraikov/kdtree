@@ -13,8 +13,8 @@ fun distanceSquared3D ([x1,x2,x3], [y1,y2,y3]) =
 
 fun distance3D (x,y) = Math.sqrt(distanceSquared3D (x,y))
 
-structure KDTree = KDTreeFn (val N = 3
-                              val distanceSquared = distanceSquared3D)
+structure KDTree = KDTreeFn (val K = 3
+                             val distanceSquared = distanceSquared3D)
 
 functor KdTreeTestFn (val distance : (real list) * (real list) -> real) =
 struct
