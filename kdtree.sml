@@ -94,6 +94,7 @@ signature KDTREE =
 sig
 
 type point
+type pointStorage
 type kdtree
 
 val empty: kdtree -> bool
@@ -120,7 +121,7 @@ val isValid: kdtree -> bool
 
 val allSubtreesAreValid: kdtree -> bool
 
-val fromTensor: RTensor.tensor -> kdtree
+val make: pointStorage -> kdtree
 
 val nearestNeighbor: kdtree -> real list -> int option
 
@@ -132,43 +133,31 @@ val kNearestNeighbors: kdtree -> int -> real list -> int list
 
 end
 
-functor KDTreeFn (val K : int
+functor KDTreeFn (
+                  type point
+                  type pointStorage
+                  val point: pointStorage -> int -> point
+                  val pointList: point -> real list
+                  val coord: point -> int -> real
+                  val pointCoord: pointStorage -> (int * int) -> real
+                  val pointStorageSize: pointStorage -> int
+                  val K : int
                   val distanceSquared : (real list) * (real list) -> real): KDTREE = 
 struct
 
 structure IntArraySort = ArrayMergeSortFn (IntArray)
 
+type point = point
+type pointStorage = pointStorage
+
 datatype kdtree' =
          KdNode of { left: kdtree', i: int, right: kdtree', axis: int }
        | KdLeaf of { ii: IntVector.vector, axis: int }
 
-type kdtree = { P: RTensor.tensor, T: kdtree' }
-
-type point = RTensorSlice.slice
+type kdtree = { P: pointStorage, T: kdtree' }
 
 exception Point
 exception IndexArray
-
-fun point P i = RTensorSlice.fromto ([i,0],[i,K-1],P)
-
-fun pointList p = List.rev (RTensorSlice.foldl (op ::) [] p)
-
-fun coord point = 
-    let val base  = RTensorSlice.base point 
-        val shape = RTensorSlice.shape point 
-        val lo    = Range.first (RTensorSlice.range point)
-        val hi    = Range.last (RTensorSlice.range point)
-    in
-        case (shape,lo,hi) of
-            ([1,n],[p,0],[p',n']) => 
-            (if ((p=p') andalso (n=n'+1))
-             then (fn (i) => RTensor.sub(base,[p,i]))
-             else raise Point)
-          | _ => raise Point
-    end
-
-
-fun pointCoord P (i,c) = RTensor.sub (P,[i,c])
 
 
 fun compareDistance reltol probe (a,b) = 
@@ -287,7 +276,7 @@ fun ifoldr f init {P,T} =
     end
 
 
-fun size {P,T} = hd (RTensor.shape P)
+fun size {P,T} = pointStorageSize P
 
 fun toList t = foldr (op ::) [] t
 
@@ -328,13 +317,13 @@ fun allSubtreesAreValid (t as {P,T}) =
 fun findiFromTo cmp (a,from,to) = IntArraySlice.findi cmp (IntArraySlice.slice (a,from,SOME (to-from+1)))
 
 
-(* Constructs a kd-tree from a tensor of points, starting with the given depth. 
+(* Constructs a kd-tree from a storage of points, starting with the given depth. 
    If I is given, then only use the point indices contained in it, otherwise use all points. *)
 
-fun fromTensorWithDepth P I depth =
+fun makeWithDepth P I depth =
     let 
         val pointCoord'  = pointCoord P
-        val [sz,_]       = RTensor.shape P
+        val sz           = pointStorageSize P
         val bucketSize   = 10 * (Int.max (Real.ceil (Math.log10 (Real.fromInt sz)),  1))
 
         val sub          = Unsafe.IntArray.sub
@@ -375,7 +364,7 @@ fun fromTensorWithDepth P I depth =
             end
 
 
-        fun fromTensorWithDepth' (I,m,n,depth) =
+        fun makeWithDepth' (I,m,n,depth) =
             (let
                  val k = n - m
              in
@@ -397,8 +386,8 @@ fun fromTensorWithDepth P I depth =
                               (let
                                    val x = pointCoord' (sub (I',median), axis)
                                                                                                                                         
-                                   val left  = fromTensorWithDepth' (I',m,median-1,depth')
-                                   val right = fromTensorWithDepth' (I',median+1,n,depth')
+                                   val left  = makeWithDepth' (I',m,median-1,depth')
+                                   val right = makeWithDepth' (I',median+1,n,depth')
 
                                            
                                in
@@ -412,13 +401,13 @@ fun fromTensorWithDepth P I depth =
     in
         if sz=0 
         then KdLeaf {ii=IntVector.fromList [], axis=Int.mod (depth, K)}
-        else (case I of NONE => fromTensorWithDepth' (IntArray.tabulate (sz, fn i => i), 0, sz-1, depth)
+        else (case I of NONE => makeWithDepth' (IntArray.tabulate (sz, fn i => i), 0, sz-1, depth)
                       | SOME I' => if (IntArray.length I') <= sz 
-                                   then fromTensorWithDepth' (I', 0, sz-1, depth)
+                                   then makeWithDepth' (I', 0, sz-1, depth)
                                    else raise IndexArray)
     end
     
-   fun fromTensor P = {P=P,T=(fromTensorWithDepth P NONE 0)}
+   fun make P = {P=P,T=(makeWithDepth P NONE 0)}
 
 
    (* Returns the index of the nearest neighbor of p in tree t. *)
@@ -552,7 +541,7 @@ fun fromTensorWithDepth P I depth =
                        (let
                             val I = IntArray.fromList ((toIndexList {P=P,T=left}) @ (toIndexList {P=P,T=right}))
                         in
-                            fromTensorWithDepth P (SOME I) axis
+                            makeWithDepth P (SOME I) axis
                         end)
                    else
 		       (if (Real.< (List.nth (pkill,axis), pointCoord' (i, axis)))
@@ -566,7 +555,6 @@ fun fromTensorWithDepth P I depth =
   
 
   (* Returns the k nearest points to p within tree. *)
-
   fun kNearestNeighbors {P,T} k probe =
       let
           val point'      = point P
@@ -613,7 +601,35 @@ fun fromTensorWithDepth P I depth =
       end
                        
 
-                            
+      fun inBounds probe bMin bMax =
+          ((ListPair.all (fn(x,y) => Real.<= (x,y)) (probe,bMax)) andalso
+           (ListPair.all (fn(x,y) => Real.>= (x,y))) (bMin,probe))
+          
+(*
+      fun rangeSearch' {P,T} bMin bMax d
+kdtRangeSearchRec Empty _ _ _ = []
+kdtRangeSearchRec (Leaf lpos ldat) bMin bMax d =
+  if (vecDimSelect lpos d) > (vecDimSelect bMin d) &&
+     (vecDimSelect lpos d) < (vecDimSelect bMax d) &&
+     (kdtInBounds lpos bMin bMax) then [(lpos,ldat)]
+                                  else []
+kdtRangeSearchRec (Node left npos ndata right) bMin bMax d =
+  if (vecDimSelect npos d) < (vecDimSelect bMin d) then
+    kdtRangeSearchRec right bMin bMax (d+1)
+  else
+    if (vecDimSelect npos d) > (vecDimSelect bMax d) then
+      kdtRangeSearchRec left bMin bMax (d+1)
+    else
+      if (kdtInBounds npos bMin bMax) then
+        (npos,ndata) : ((kdtRangeSearchRec right bMin bMax (d+1))++
+                        (kdtRangeSearchRec left bMin bMax (d+1)))
+      else
+        (kdtRangeSearchRec right bMin bMax (d+1))++
+        (kdtRangeSearchRec left bMin bMax (d+1))
 
+kdtRangeSearch :: (KDTreeNode a) -> Vec3 -> Vec3 -> [(Vec3,a)]
+kdtRangeSearch t bMin bMax =
+  kdtRangeSearchRec t bMin bMax 0
+*)
 
 end

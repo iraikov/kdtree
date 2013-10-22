@@ -1,6 +1,31 @@
 
 exception Point
 
+val K = 3
+
+fun point P i = RTensorSlice.fromto ([i,0],[i,K-1],P)
+
+fun pointList p = List.rev (RTensorSlice.foldl (op ::) [] p)
+
+fun coord point = 
+    let val base  = RTensorSlice.base point 
+        val shape = hd (RTensorSlice.shapes point)
+        val lo    = Range.first (RTensorSlice.range point)
+        val hi    = Range.last (RTensorSlice.range point)
+    in
+        case (shape,lo,hi) of
+            ([1,n],[p,0],[p',n']) => 
+            (if ((p=p') andalso (n=n'+1))
+             then (fn (i) => RTensor.sub(base,[p,i]))
+             else raise Point)
+          | _ => raise Point
+    end
+
+
+fun pointCoord P (i,c) = RTensor.sub (P,[i,c])
+
+fun pointStorageSize P = hd (RTensor.shape P)
+
 fun distanceSquared3D ([x1,x2,x3], [y1,y2,y3]) = 
     let 
         val d1 =  Real.- (x1, y1)
@@ -13,7 +38,15 @@ fun distanceSquared3D ([x1,x2,x3], [y1,y2,y3]) =
 
 fun distance3D (x,y) = Math.sqrt(distanceSquared3D (x,y))
 
-structure KDTree = KDTreeFn (val K = 3
+
+structure KDTree = KDTreeFn (type point = RTensorSlice.slice
+                             type pointStorage = RTensor.tensor
+                             val point = point
+                             val pointList = pointList
+                             val coord = coord
+                             val pointCoord = pointCoord
+                             val pointStorageSize = pointStorageSize
+                             val K = K
                              val distanceSquared = distanceSquared3D)
 
 functor KdTreeTestFn (val distance : (real list) * (real list) -> real) =
@@ -109,7 +142,7 @@ val pts = let
 
 
 
-val t  = KDTree.fromTensor P
+val t  = KDTree.make P
 
 val _ = print "tree constructed\n"
 
