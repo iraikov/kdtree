@@ -1,4 +1,13 @@
 
+fun timing (action) = 
+    let
+        val timer = Timer.startCPUTimer ()
+        val result = action ()
+        val times = Timer.checkCPUTimer timer
+    in
+        (result, Time.+ (#usr times, #sys times))
+    end
+
 exception Point
 
 val K = 3
@@ -142,9 +151,9 @@ val pts = let
 
 
 
-val t  = KDTree.make P
+val (t,ti)  = timing (fn () => KDTree.make P)
 
-val _ = print "tree constructed\n"
+val _ = print ("tree constructed (" ^ (Time.toString ti) ^ " s)\n")
 
 val _ = print ("tree size = " ^ (Int.toString (KDTree.size t)) ^ "\n")
 val _ = print ("length of tree list = " ^ (Int.toString (List.length (KDTree.toList t))) ^ "\n")
@@ -166,13 +175,13 @@ val _  = let  fun recur (i) =
                                   Real.- (RTensor.sub (P, [xi,1]), 0.1),
                                   Real.+ (0.1, RTensor.sub (P, [xi,2]))]
                                  
-                        val sorted = sortPoints distance3D (x,pts)
+                        val sorted  = sortPoints distance3D (x,pts)
+                        val _       = print ("test trial " ^ (Int.toString i) ^ "\n")
+                        val (_,ti)  = timing (fn () => KdTreeTest.testNearestNeighbor (sorted,t,x))
+                        val _       = print ("nearest neighbor check passed (" ^ (Time.toString ti) ^ " s)\n")
+                        val (_,ti)  = timing (fn () => KdTreeTest.testNearNeighbors (sorted,t,x,0.3))
+                        val _       = print ("near neighbors check passed (" ^ (Time.toString ti) ^ "s)\n")
                     in 
-                        print ("test trial " ^ (Int.toString i) ^ "\n");
-                        KdTreeTest.testNearestNeighbor (sorted,t,x);
-                        print "nearest neighbor check passed\n";
-                        KdTreeTest.testNearNeighbors (sorted,t,x,0.3);
-                        print "near neighbors check passed\n";
                         recur (i-1)
                     end)
                else ()
