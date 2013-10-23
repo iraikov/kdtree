@@ -20,8 +20,8 @@
  and so on.
 
 
- This code is based on the Haskell kd-tree library implementation of
- K-D trees and on Haskell kd-tree code by Matthew Sottile.
+ This code is based on the Haskell KdTree library by Isaac Trotts and
+ on Haskell kd-tree code by Matthew Sottile.
 
  Copyright 2012-2013 Ivan Raikov and the Okinawa Institute of
  Science and Technology.
@@ -110,37 +110,37 @@ end
 functor TensorPointStorageFn (val K : int): KPOINT_STORAGE =
 struct
 
-exception Point
+    exception Point
 
-type point = RTensorSlice.slice
+    type point = RTensorSlice.slice
 
-type pointStorage = RTensor.tensor
-
-val K = K
-
-fun point P i = RTensorSlice.fromto ([i,0],[i,K-1],P)
-
-fun pointList p = List.rev (RTensorSlice.foldl (op ::) [] p)
-
-fun coord point = 
-    let val base  = RTensorSlice.base point 
-        val shape = hd (RTensorSlice.shapes point)
-        val lo    = Range.first (RTensorSlice.range point)
-        val hi    = Range.last (RTensorSlice.range point)
-    in
-        case (shape,lo,hi) of
-            ([1,n],[p,0],[p',n']) => 
-            (if ((p=p') andalso (n=n'+1))
-             then (fn (i) => RTensor.sub(base,[p,i]))
-             else raise Point)
-          | _ => raise Point
-    end
-
-
-fun pointCoord P (i,c) = RTensor.sub (P,[i,c])
-
-fun size P = hd (RTensor.shape P)
-
+    type pointStorage = RTensor.tensor
+                        
+    val K = K
+            
+    fun point P i = RTensorSlice.fromto ([i,0],[i,K-1],P)
+                    
+    fun pointList p = List.rev (RTensorSlice.foldl (op ::) [] p)
+                      
+    fun coord point = 
+        let val base  = RTensorSlice.base point 
+            val shape = hd (RTensorSlice.shapes point)
+            val lo    = Range.first (RTensorSlice.range point)
+            val hi    = Range.last (RTensorSlice.range point)
+        in
+            case (shape,lo,hi) of
+                ([1,n],[p,0],[p',n']) => 
+                (if ((p=p') andalso (n=n'+1))
+                 then (fn (i) => RTensor.sub(base,[p,i]))
+                 else raise Point)
+              | _ => raise Point
+        end
+        
+        
+    fun pointCoord P (i,c) = RTensor.sub (P,[i,c])
+                             
+    fun size P = hd (RTensor.shape P)
+                 
 end
 
 
