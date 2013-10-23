@@ -90,19 +90,57 @@ fun minimumBy lst cmpfn: int option =
 
 end
 
-(* A data structure for storing and looking up points *)
+(* A data structure for storing and looking up K-dimensional points *)
 
-signature POINT_STORAGE =
+signature KPOINT_STORAGE =
 sig
     type point
     type pointStorage
-    
+
+    val K : int
     val point: pointStorage -> int -> point
     val pointList: point -> real list
     val coord: point -> int -> real
     val pointCoord: pointStorage -> (int * int) -> real
     val size: pointStorage -> int
     
+end
+
+(* Point storage based on tensors *)
+functor TensorPointStorageFn (val K : int): KPOINT_STORAGE =
+struct
+
+exception Point
+
+type point = RTensorSlice.slice
+
+type pointStorage = RTensor.tensor
+
+val K = K
+
+fun point P i = RTensorSlice.fromto ([i,0],[i,K-1],P)
+
+fun pointList p = List.rev (RTensorSlice.foldl (op ::) [] p)
+
+fun coord point = 
+    let val base  = RTensorSlice.base point 
+        val shape = hd (RTensorSlice.shapes point)
+        val lo    = Range.first (RTensorSlice.range point)
+        val hi    = Range.last (RTensorSlice.range point)
+    in
+        case (shape,lo,hi) of
+            ([1,n],[p,0],[p',n']) => 
+            (if ((p=p') andalso (n=n'+1))
+             then (fn (i) => RTensor.sub(base,[p,i]))
+             else raise Point)
+          | _ => raise Point
+    end
+
+
+fun pointCoord P (i,c) = RTensor.sub (P,[i,c])
+
+fun size P = hd (RTensor.shape P)
+
 end
 
 
@@ -152,8 +190,7 @@ val kNearestNeighbors: kdtree -> int -> real list -> int list
 end
 
 functor KDTreeFn (
-                  structure S : POINT_STORAGE
-                  val K : int
+                  structure S : KPOINT_STORAGE
                   val distanceSquared : (real list) * (real list) -> real
                  ): KDTREE = 
 struct
@@ -172,6 +209,7 @@ type kdtree = { P: pointStorage, T: kdtree' }
 exception Point
 exception IndexArray
 
+val K = S.K
 
 fun compareDistance reltol probe (a,b) = 
     let
