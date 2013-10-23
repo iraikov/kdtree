@@ -92,29 +92,29 @@ end
 
 (* A data structure for storing and looking up K-dimensional points *)
 
-signature KPOINT_STORAGE =
+signature KPOINT_SPACE =
 sig
     type point
-    type pointStorage
+    type pointSpace
 
     val K : int
-    val point: pointStorage -> int -> point
+    val point: pointSpace -> int -> point
     val pointList: point -> real list
     val coord: point -> int -> real
-    val pointCoord: pointStorage -> (int * int) -> real
-    val size: pointStorage -> int
+    val pointCoord: pointSpace -> (int * int) -> real
+    val size: pointSpace -> int
     
 end
 
-(* Point storage based on tensors *)
-functor TensorPointStorageFn (val K : int): KPOINT_STORAGE =
+(* Point space based on tensors *)
+functor TensorPointSpaceFn (val K : int): KPOINT_SPACE =
 struct
 
     exception Point
 
     type point = RTensorSlice.slice
 
-    type pointStorage = RTensor.tensor
+    type pointSpace = RTensor.tensor
                         
     val K = K
             
@@ -148,7 +148,7 @@ signature KDTREE =
 sig
 
 type point
-type pointStorage
+type pointSpace
 type kdtree
 
 val isEmpty: kdtree -> bool
@@ -175,7 +175,7 @@ val isValid: kdtree -> bool
 
 val allSubtreesAreValid: kdtree -> bool
 
-val fromPoints: pointStorage -> kdtree
+val fromPoints: pointSpace -> kdtree
 
 (*val addPoint: point * kdtree -> kdtree*)
 
@@ -190,7 +190,7 @@ val kNearestNeighbors: kdtree -> int -> real list -> int list
 end
 
 functor KDTreeFn (
-                  structure S : KPOINT_STORAGE
+                  structure S : KPOINT_SPACE
                   val distanceSquared : (real list) * (real list) -> real
                  ): KDTREE = 
 struct
@@ -198,13 +198,13 @@ struct
 structure IntArraySort = ArrayMergeSortFn (IntArray)
 
 type point = S.point
-type pointStorage = S.pointStorage
+type pointSpace = S.pointSpace
 
 datatype kdtree' =
          KdNode of { left: kdtree', i: int, right: kdtree', axis: int }
        | KdLeaf of { ii: IntVector.vector, axis: int }
 
-type kdtree = { P: pointStorage, T: kdtree' }
+type kdtree = { P: pointSpace, T: kdtree' }
 
 exception Point
 exception IndexArray
@@ -369,7 +369,7 @@ fun allSubtreesAreValid (t as {P,T}) =
 fun findiFromTo cmp (a,from,to) = IntArraySlice.findi cmp (IntArraySlice.slice (a,from,SOME (to-from+1)))
 
 
-(* Constructs a kd-tree from a storage of points, starting with the given depth. 
+(* Constructs a kd-tree from a point space, starting with the given depth. 
    If I is given, then only use the point indices contained in it, otherwise use all points. *)
 
 fun fromPointsWithDepth P I depth =
