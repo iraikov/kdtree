@@ -12,6 +12,25 @@ exception Point
 
 val K = 3
 
+fun distanceSquared3D ([x1,x2,x3], [y1,y2,y3]) = 
+    let 
+        val d1 =  Real.- (x1, y1)
+        val d2 =  Real.- (x2, y2)
+        val d3 =  Real.- (x3, y3)
+    in
+        List.foldl Real.+ 0.0 [Real.* (d1,d1), Real.* (d2,d2), Real.* (d3,d3)]
+    end
+  | distanceSquared3D (_, _) = raise Point
+
+fun distance3D (x,y) = Math.sqrt(distanceSquared3D (x,y))
+
+structure TensorPointStorage =
+struct
+
+type point = RTensorSlice.slice
+
+type pointStorage = RTensor.tensor
+
 fun point P i = RTensorSlice.fromto ([i,0],[i,K-1],P)
 
 fun pointList p = List.rev (RTensorSlice.foldl (op ::) [] p)
@@ -33,28 +52,12 @@ fun coord point =
 
 fun pointCoord P (i,c) = RTensor.sub (P,[i,c])
 
-fun pointStorageSize P = hd (RTensor.shape P)
+fun size P = hd (RTensor.shape P)
 
-fun distanceSquared3D ([x1,x2,x3], [y1,y2,y3]) = 
-    let 
-        val d1 =  Real.- (x1, y1)
-        val d2 =  Real.- (x2, y2)
-        val d3 =  Real.- (x3, y3)
-    in
-        List.foldl Real.+ 0.0 [Real.* (d1,d1), Real.* (d2,d2), Real.* (d3,d3)]
-    end
-  | distanceSquared3D (_, _) = raise Point
-
-fun distance3D (x,y) = Math.sqrt(distanceSquared3D (x,y))
+end
 
 
-structure KDTree = KDTreeFn (type point = RTensorSlice.slice
-                             type pointStorage = RTensor.tensor
-                             val point = point
-                             val pointList = pointList
-                             val coord = coord
-                             val pointCoord = pointCoord
-                             val pointStorageSize = pointStorageSize
+structure KDTree = KDTreeFn (structure S = TensorPointStorage
                              val K = K
                              val distanceSquared = distanceSquared3D)
 
@@ -151,7 +154,7 @@ val pts = let
 
 
 
-val (t,ti)  = timing (fn () => KDTree.make P)
+val (t,ti)  = timing (fn () => KDTree.fromPoints P)
 
 val _ = print ("tree constructed (" ^ (Time.toString ti) ^ " s)\n")
 

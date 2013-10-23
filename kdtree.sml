@@ -21,7 +21,7 @@
 
 
  This code is based on the Haskell kd-tree library implementation of
- K-D trees.
+ K-D trees and on Haskell kd-tree code by Matthew Sottile.
 
  Copyright 2012-2013 Ivan Raikov and the Okinawa Institute of
  Science and Technology.
@@ -90,6 +90,22 @@ fun minimumBy lst cmpfn: int option =
 
 end
 
+(* A data structure for storing and looking up points *)
+
+signature POINT_STORAGE =
+sig
+    type point
+    type pointStorage
+    
+    val point: pointStorage -> int -> point
+    val pointList: point -> real list
+    val coord: point -> int -> real
+    val pointCoord: pointStorage -> (int * int) -> real
+    val size: pointStorage -> int
+    
+end
+
+
 signature KDTREE = 
 sig
 
@@ -97,7 +113,7 @@ type point
 type pointStorage
 type kdtree
 
-val empty: kdtree -> bool
+val isEmpty: kdtree -> bool
 
 val app: (point -> unit) -> kdtree -> unit
 val appi: (int * point -> unit)  -> kdtree -> unit
@@ -121,7 +137,9 @@ val isValid: kdtree -> bool
 
 val allSubtreesAreValid: kdtree -> bool
 
-val make: pointStorage -> kdtree
+val fromPoints: pointStorage -> kdtree
+
+(*val addPoint: point * kdtree -> kdtree*)
 
 val nearestNeighbor: kdtree -> real list -> int option
 
@@ -134,21 +152,16 @@ val kNearestNeighbors: kdtree -> int -> real list -> int list
 end
 
 functor KDTreeFn (
-                  type point
-                  type pointStorage
-                  val point: pointStorage -> int -> point
-                  val pointList: point -> real list
-                  val coord: point -> int -> real
-                  val pointCoord: pointStorage -> (int * int) -> real
-                  val pointStorageSize: pointStorage -> int
+                  structure S : POINT_STORAGE
                   val K : int
-                  val distanceSquared : (real list) * (real list) -> real): KDTREE = 
+                  val distanceSquared : (real list) * (real list) -> real
+                 ): KDTREE = 
 struct
 
 structure IntArraySort = ArrayMergeSortFn (IntArray)
 
-type point = point
-type pointStorage = pointStorage
+type point = S.point
+type pointStorage = S.pointStorage
 
 datatype kdtree' =
          KdNode of { left: kdtree', i: int, right: kdtree', axis: int }
@@ -162,7 +175,8 @@ exception IndexArray
 
 fun compareDistance reltol probe (a,b) = 
     let
-        val delta  = Real.- (distanceSquared (probe, pointList a), distanceSquared (probe, pointList b))
+        val delta  = Real.- (distanceSquared (probe, S.pointList a), 
+                             distanceSquared (probe, S.pointList b))
     in
         case reltol of
             NONE   => (if Real.< (delta, 0.0) then LESS else GREATER)
@@ -174,18 +188,18 @@ fun compareDistance reltol probe (a,b) =
 
 
 
-fun empty' T =
+fun isEmpty' T =
     case T of
         KdNode _         => false
       | KdLeaf {ii,axis} => (IntVector.length ii)=0
     
 
-fun empty {P,T} = empty' T
+fun isEmpty {P,T} = isEmpty' T
 
 
 fun app f {P,T} =
     let
-        val p = point P
+        val p = S.point P
         fun app' T =
             case T of 
                 KdNode {left,i,right,axis} => (app' left; f (p i); app' right)
@@ -197,7 +211,7 @@ fun app f {P,T} =
 
 fun appi f {P,T} =
     let
-        val p = point P
+        val p = S.point P
         fun appi' T =
             case T of 
                 KdNode {left,i,right,axis} => (appi' left; f (i, p i); appi' right)
@@ -209,7 +223,7 @@ fun appi f {P,T} =
 
 fun foldl f init {P,T} =
     let
-        val p = point P
+        val p = S.point P
         fun foldl' init T =
             case T of 
                 KdNode {left,i,right,axis} => (let val init' = foldl' init left
@@ -223,7 +237,7 @@ fun foldl f init {P,T} =
 
 fun foldli f init {P,T} =
     let
-        val p = point P
+        val p = S.point P
         fun foldli' init T =
             case T of 
                 KdNode {left,i,right,axis} => (let val init' = foldli' init left
@@ -237,7 +251,7 @@ fun foldli f init {P,T} =
 
 fun foldr f init {P,T} =
     let
-        val p = point P
+        val p = S.point P
         fun foldr' init T =
             case T of 
                 KdNode {left,i,right,axis} => (let val init' = foldr' init right
@@ -251,7 +265,7 @@ fun foldr f init {P,T} =
 
 fun foldri f init {P,T} =
     let
-        val p = point P
+        val p = S.point P
         fun foldri' init T =
             case T of 
                 KdNode {left,i,right,axis} => (let val init'  = foldri' init right
@@ -276,7 +290,7 @@ fun ifoldr f init {P,T} =
     end
 
 
-fun size {P,T} = pointStorageSize P
+fun size {P,T} = S.size P
 
 fun toList t = foldr (op ::) [] t
 
@@ -298,10 +312,10 @@ fun isValid {P,T} =
         KdLeaf _ => true
       | KdNode {left,i,right,axis} =>
         let
-            val x          = pointCoord P (i, axis)
-            val leftValid  = (List.all (fn y => Real.< (coord y axis, x))
+            val x          = S.pointCoord P (i, axis)
+            val leftValid  = (List.all (fn y => Real.< (S.coord y axis, x))
                                        (toList {P=P,T=left}))
-            val rightValid = (List.all (fn y => Real.>= (coord y axis, x))
+            val rightValid = (List.all (fn y => Real.>= (S.coord y axis, x))
                                        (toList {P=P,T=right}))
         in
             leftValid andalso rightValid
@@ -320,10 +334,10 @@ fun findiFromTo cmp (a,from,to) = IntArraySlice.findi cmp (IntArraySlice.slice (
 (* Constructs a kd-tree from a storage of points, starting with the given depth. 
    If I is given, then only use the point indices contained in it, otherwise use all points. *)
 
-fun makeWithDepth P I depth =
+fun fromPointsWithDepth P I depth =
     let 
-        val pointCoord'  = pointCoord P
-        val sz           = pointStorageSize P
+        val pointCoord'  = S.pointCoord P
+        val sz           = S.size P
         val bucketSize   = 10 * (Int.max (Real.ceil (Math.log10 (Real.fromInt sz)),  1))
 
         val sub          = Unsafe.IntArray.sub
@@ -364,7 +378,7 @@ fun makeWithDepth P I depth =
             end
 
 
-        fun makeWithDepth' (I,m,n,depth) =
+        fun fromPointsWithDepth' (I,m,n,depth) =
             (let
                  val k = n - m
              in
@@ -386,8 +400,8 @@ fun makeWithDepth P I depth =
                               (let
                                    val x = pointCoord' (sub (I',median), axis)
                                                                                                                                         
-                                   val left  = makeWithDepth' (I',m,median-1,depth')
-                                   val right = makeWithDepth' (I',median+1,n,depth')
+                                   val left  = fromPointsWithDepth' (I',m,median-1,depth')
+                                   val right = fromPointsWithDepth' (I',median+1,n,depth')
 
                                            
                                in
@@ -401,22 +415,43 @@ fun makeWithDepth P I depth =
     in
         if sz=0 
         then KdLeaf {ii=IntVector.fromList [], axis=Int.mod (depth, K)}
-        else (case I of NONE => makeWithDepth' (IntArray.tabulate (sz, fn i => i), 0, sz-1, depth)
+        else (case I of NONE => fromPointsWithDepth' (IntArray.tabulate (sz, fn i => i), 0, sz-1, depth)
                       | SOME I' => if (IntArray.length I') <= sz 
-                                   then makeWithDepth' (I', 0, sz-1, depth)
+                                   then fromPointsWithDepth' (I', 0, sz-1, depth)
                                    else raise IndexArray)
     end
     
-   fun make P = {P=P,T=(makeWithDepth P NONE 0)}
+   fun fromPoints P = {P=P,T=(fromPointsWithDepth P NONE 0)}
+(*
+   fun addPointWithDepth {P,T} p i d = 
+       case T of
+           KdLeaf {ii,axis} => if IntVector.length (ii) = 0
+                               then {ii=IntVector.fromList [i],
+                                     axis=axis}
+                               else 
+                                     
+         | KdNode {left,i,right,axis} => 
 
+
+kdtAddWithDepth (Leaf lpos ldat) pos dat d =
+  if (vecDimSelect pos d) < (vecDimSelect lpos d) then
+    Node (Leaf pos dat) lpos ldat Empty
+  else
+    Node Empty lpos ldat (Leaf pos dat)
+kdtAddWithDepth (Node left npos ndata right) pos dat d =
+  if (vecDimSelect pos d) < (vecDimSelect npos d) then
+    Node (kdtAddWithDepth left pos dat (d+1)) npos ndata right
+  else
+    Node left npos ndata (kdtAddWithDepth right pos dat (d+1))
+*)
 
    (* Returns the index of the nearest neighbor of p in tree t. *)
 
    fun nearestNeighbor {P,T} probe =
 
        let
-           val point'      = point P
-           val pointCoord' = pointCoord P
+           val point'      = S.point P
+           val pointCoord' = S.pointCoord P
            val compareDistance' = compareDistance (SOME 1E~16) probe
 
            fun compareDistance'' (i,j) =
@@ -435,7 +470,7 @@ fun makeWithDepth P I depth =
                            val candidate = point' (hd candidates')
                        in
                            Real.< (Real.* (delta,delta), 
-                                   distanceSquared (probe, pointList candidate))
+                                   distanceSquared (probe, S.pointList candidate))
                        end
 
                    val candidates'' = if sphereIntersectsPlane
@@ -473,11 +508,11 @@ fun makeWithDepth P I depth =
    (* Returns all neighbors within distance r from p in tree t. *)
    fun nearNeighbors {P,T} radius probe =
        let
-           val point'      = point P
-           val pointCoord' = pointCoord P
+           val point'      = S.point P
+           val pointCoord' = S.pointCoord P
            val r2          = Real.* (radius, radius)
            fun filterIndices ii = IntVectorUtils.filter 
-                                      ii (fn (i) => (Real.<= (distanceSquared (probe, pointList (point' i)), r2)))
+                                      ii (fn (i) => (Real.<= (distanceSquared (probe, S.pointList (point' i)), r2)))
 
            fun nearNeighbors' t =
                case t of
@@ -489,7 +524,7 @@ fun makeWithDepth P I depth =
 	           (let 
                         val maybePivot = filterIndices (IntVector.fromList [i])
 	            in
-		        if (empty' left) andalso (empty' right)
+		        if (isEmpty' left) andalso (isEmpty' right)
                         then maybePivot
                         else 
 		            (let 
@@ -523,11 +558,11 @@ fun makeWithDepth P I depth =
    fun remove  {P,T} tol pkill =
 
        let
-           val point'      = point P
-           val pointCoord' = pointCoord P
+           val point'      = S.point P
+           val pointCoord' = S.pointCoord P
            val tol2        = Real.* (tol, tol)
            fun filterIndices ii = IntVectorUtils.filter 
-                                      ii (fn (i) => (Real.> (distanceSquared (pkill, pointList (point' i)), tol2)))
+                                      ii (fn (i) => (Real.> (distanceSquared (pkill, S.pointList (point' i)), tol2)))
 
 	   fun remove' t =
                case t of
@@ -536,12 +571,12 @@ fun makeWithDepth P I depth =
                    KdLeaf { ii = IntVector.fromList (filterIndices ii), axis = axis }
                                       
 	         | KdNode { left, i, right, axis } =>
-                   if (Real.> (distanceSquared (pkill, pointList (point' i)), tol2))
+                   if (Real.> (distanceSquared (pkill, S.pointList (point' i)), tol2))
                    then 
                        (let
                             val I = IntArray.fromList ((toIndexList {P=P,T=left}) @ (toIndexList {P=P,T=right}))
                         in
-                            makeWithDepth P (SOME I) axis
+                            fromPointsWithDepth P (SOME I) axis
                         end)
                    else
 		       (if (Real.< (List.nth (pkill,axis), pointCoord' (i, axis)))
@@ -557,7 +592,7 @@ fun makeWithDepth P I depth =
   (* Returns the k nearest points to p within tree. *)
   fun kNearestNeighbors {P,T} k probe =
       let
-          val point'      = point P
+          val point'      = S.point P
                             
           val compareDistance' = 
               compareDistance (SOME 1E~16) probe
@@ -591,7 +626,7 @@ fun makeWithDepth P I depth =
                                 NONE => []
                               | SOME n => 
                                 let
-                                    val {P=_, T=t'} = remove {P=P,T=t} 1E~16 (pointList (point' n))
+                                    val {P=_, T=t'} = remove {P=P,T=t} 1E~16 (S.pointList (point' n))
                                 in
                                     n :: (kNearestNeighbors {P=P,T=t'} (k - 1) probe)
                                 end
