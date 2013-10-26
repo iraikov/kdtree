@@ -1,6 +1,6 @@
 
-This code is based on the Haskell kd-tree library implementation of
-K-D trees.
+This code is based on the Haskell KdTree library by Isaac Trotts and
+on Haskell kd-tree code by Matthew Sottile.
 
 Copyright 2013 Ivan Raikov and the Okinawa Institute of
 Science and Technology.
