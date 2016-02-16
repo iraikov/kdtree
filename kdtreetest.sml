@@ -24,7 +24,7 @@ fun distance3D (x,y) = Math.sqrt(distanceSquared3D (x,y))
 
 
 structure KDTree = KDTreeFn (structure S = TensorPointSpaceFn (val K = 3)
-                             val distanceSquared = distanceSquared3D)
+                             val distance = distanceSquared3D)
 
 functor KdTreeTestFn (val distance : (real list) * (real list) -> real) =
 struct

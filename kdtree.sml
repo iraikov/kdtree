@@ -63,7 +63,6 @@ fun filter v ffn: int list =
 fun toList v = 
     IntVector.foldl (fn (i,ax) => i::ax) [] v
 
-
 end
 
 
@@ -176,8 +175,6 @@ val allSubtreesAreValid: kdtree -> bool
 
 val fromPoints: pointSpace -> kdtree
 
-(*val addPoint: point * kdtree -> kdtree*)
-
 val nearestNeighbor: kdtree -> real list -> int option
 
 val nearNeighbors: kdtree -> real -> real list -> int list
@@ -186,11 +183,16 @@ val remove: kdtree -> real -> real list -> kdtree
 
 val kNearestNeighbors: kdtree -> int -> real list -> int list
 
+val rangeSearch: kdtree -> (int * int) -> int list
+
+
+(*val addPoint: point * kdtree -> kdtree*)
+
 end
 
 functor KDTreeFn (
                   structure S : KPOINT_SPACE
-                  val distanceSquared : (real list) * (real list) -> real
+                  val distance : (real list) * (real list) -> real
                  ): KDTREE = 
 struct
 
@@ -212,8 +214,8 @@ val K = S.K
 
 fun compareDistance reltol probe (a,b) = 
     let
-        val delta  = Real.- (distanceSquared (probe, S.pointList a), 
-                             distanceSquared (probe, S.pointList b))
+        val delta  = Real.- (distance (probe, S.pointList a), 
+                             distance (probe, S.pointList b))
     in
         case reltol of
             NONE   => (if Real.< (delta, 0.0) then LESS else GREATER)
@@ -459,28 +461,6 @@ fun fromPointsWithDepth P I depth =
     end
     
    fun fromPoints P = {P=P,T=(fromPointsWithDepth P NONE 0)}
-(*
-   fun addPointWithDepth {P,T} p i d = 
-       case T of
-           KdLeaf {ii,axis} => if IntVector.length (ii) = 0
-                               then {ii=IntVector.fromList [i],
-                                     axis=axis}
-                               else 
-                                     
-         | KdNode {left,i,right,axis} => 
-
-
-kdtAddWithDepth (Leaf lpos ldat) pos dat d =
-  if (vecDimSelect pos d) < (vecDimSelect lpos d) then
-    Node (Leaf pos dat) lpos ldat Empty
-  else
-    Node Empty lpos ldat (Leaf pos dat)
-kdtAddWithDepth (Node left npos ndata right) pos dat d =
-  if (vecDimSelect pos d) < (vecDimSelect npos d) then
-    Node (kdtAddWithDepth left pos dat (d+1)) npos ndata right
-  else
-    Node left npos ndata (kdtAddWithDepth right pos dat (d+1))
-*)
 
    (* Returns the index of the nearest neighbor of p in tree t. *)
 
@@ -507,7 +487,7 @@ kdtAddWithDepth (Node left npos ndata right) pos dat d =
                            val candidate = point' (hd candidates')
                        in
                            Real.< (Real.* (delta,delta), 
-                                   distanceSquared (probe, S.pointList candidate))
+                                   distance (probe, S.pointList candidate))
                        end
 
                    val candidates'' = if sphereIntersectsPlane
@@ -549,7 +529,7 @@ kdtAddWithDepth (Node left npos ndata right) pos dat d =
            val pointCoord' = S.pointCoord P
            val r2          = Real.* (radius, radius)
            fun filterIndices ii = IntVectorUtils.filter 
-                                      ii (fn (i) => (Real.<= (distanceSquared (probe, S.pointList (point' i)), r2)))
+                                      ii (fn (i) => (Real.<= (distance (probe, S.pointList (point' i)), r2)))
 
            fun nearNeighbors' t =
                case t of
@@ -599,7 +579,7 @@ kdtAddWithDepth (Node left npos ndata right) pos dat d =
            val pointCoord' = S.pointCoord P
            val tol2        = Real.* (tol, tol)
            fun filterIndices ii = IntVectorUtils.filter 
-                                      ii (fn (i) => (Real.> (distanceSquared (pkill, S.pointList (point' i)), tol2)))
+                                      ii (fn (i) => (Real.> (distance (pkill, S.pointList (point' i)), tol2)))
 
 	   fun remove' t =
                case t of
@@ -608,7 +588,7 @@ kdtAddWithDepth (Node left npos ndata right) pos dat d =
                    KdLeaf { ii = IntVector.fromList (filterIndices ii), axis = axis }
                                       
 	         | KdNode { left, i, right, axis } =>
-                   if (Real.> (distanceSquared (pkill, S.pointList (point' i)), tol2))
+                   if (Real.> (distance (pkill, S.pointList (point' i)), tol2))
                    then 
                        (let
                             val I = IntArray.fromList ((toIndexList {P=P,T=left}) @ (toIndexList {P=P,T=right}))
@@ -673,35 +653,75 @@ kdtAddWithDepth (Node left npos ndata right) pos dat d =
       end
                        
 
-      fun inBounds probe bMin bMax =
-          ((ListPair.all (fn(x,y) => Real.<= (x,y)) (probe,bMax)) andalso
-           (ListPair.all (fn(x,y) => Real.>= (x,y))) (bMin,probe))
-          
-(*
-      fun rangeSearch' {P,T} bMin bMax d
-kdtRangeSearchRec Empty _ _ _ = []
-kdtRangeSearchRec (Leaf lpos ldat) bMin bMax d =
-  if (vecDimSelect lpos d) > (vecDimSelect bMin d) &&
-     (vecDimSelect lpos d) < (vecDimSelect bMax d) &&
-     (kdtInBounds lpos bMin bMax) then [(lpos,ldat)]
-                                  else []
-kdtRangeSearchRec (Node left npos ndata right) bMin bMax d =
-  if (vecDimSelect npos d) < (vecDimSelect bMin d) then
-    kdtRangeSearchRec right bMin bMax (d+1)
-  else
-    if (vecDimSelect npos d) > (vecDimSelect bMax d) then
-      kdtRangeSearchRec left bMin bMax (d+1)
-    else
-      if (kdtInBounds npos bMin bMax) then
-        (npos,ndata) : ((kdtRangeSearchRec right bMin bMax (d+1))++
-                        (kdtRangeSearchRec left bMin bMax (d+1)))
-      else
-        (kdtRangeSearchRec right bMin bMax (d+1))++
-        (kdtRangeSearchRec left bMin bMax (d+1))
+      fun inBounds (xMin, xMax) probe  =
+          (Real.<= (probe,xMax) andalso Real.>= (xMin,probe))
 
-kdtRangeSearch :: (KDTreeNode a) -> Vec3 -> Vec3 -> [(Vec3,a)]
-kdtRangeSearch t bMin bMax =
-  kdtRangeSearchRec t bMin bMax 0
-*)
+
+      fun rangeSearch' {P,T} (bMin, bMax) ax =
+          let
+              val pointCoord' = S.pointCoord P
+          in
+              case T of
+                  KdLeaf { ii, axis } => 
+                  (let
+                      val xMin = pointCoord' (bMin, axis)
+                      val xMax = pointCoord' (bMax, axis)
+                      val inBounds' = inBounds (xMin, xMax)
+                  in
+                      if Real.< (xMin, xMax) andalso 
+                         Real.>= (xMax, pointCoord' (IntVector.sub(ii,0), axis))  andalso
+                         Real.<= (xMin, pointCoord' (IntVector.sub(ii,(IntVector.length ii)-1), axis))
+                      then (IntVectorUtils.filter ii (fn (x) =>  inBounds' (pointCoord' (x, axis)))) @ ax
+                      else ax
+                  end)
+                | KdNode { left, i, right, axis } =>
+                  (let
+                      val xMin = pointCoord' (bMin, axis)
+                      val xMax = pointCoord' (bMax, axis)
+                      val xVal = pointCoord' (i, axis)
+                      val inBounds' = inBounds (xMin, xMax)
+                  in
+                      if Real.< (xMax, xVal)
+                      then rangeSearch' {P=P,T=left} (bMin,bMax) ax
+                      else (if Real.> (xMin, xVal)
+                            then rangeSearch' {P=P,T=right} (bMin,bMax) ax
+                            else (let val ax' = if inBounds' xVal then i::ax else ax
+                                  in rangeSearch' {P=P,T=right} (bMin,bMax) 
+                                                  (rangeSearch' {P=P,T=left} (bMin,bMax) ax')
+                                  end))
+                                                                
+                  end)
+          end
+
+      fun rangeSearch t (bMin, bMax) = rangeSearch' t (bMin, bMax) []
+
+
+(*
+   fun addPointWithDepth {P,T} p = 
+       let
+           val sub          = Unsafe.IntArray.sub
+           val pointCoord'  = S.pointCoord P
+       in
+           case T of
+               KdLeaf {ii,axis} => 
+               if IntVector.length (ii) = 0
+               then KdLeaf {ii=IntVector.fromList [i],axis=axis}
+               else
+                   (let 
+                       val e   = (IntVector.length ii)-1
+                       val ecx = pointCoord' (sub (I, IntVector.sub(ii,e)), axis)
+                       val scx = pointCoord' (sub (I, IntVector.sub(ii,0)), axis)
+                       val pcx = S.coord p axis
+                   in
+                       if pcx > ecx
+                       then KdNode {left=left,i=sub(I',pi),right=right,axis=axis}
+                       else 
+                           (if pcx < ecx
+                            then KdNode {left=left,i=sub(I',median),right=right,axis=axis}
+                            else KdLeaf {ii=IntVector.cons (pid,ii),axis=axis})
+                   end)
+         | KdNode {left,i,right,axis} => 
+*)           
+
 
 end
