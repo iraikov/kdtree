@@ -23,7 +23,7 @@
  This code is based on the Haskell KdTree library by Isaac Trotts and
  on Haskell kd-tree code by Matthew Sottile.
 
- Copyright 2012-2016 Ivan Raikov.
+ Copyright 2013-2016 Ivan Raikov.
 
  This program is free software: you can redistribute it and/or
  modify it under the terms of the GNU General Public License as

@@ -2,8 +2,7 @@
 This code is based on the Haskell KdTree library by Isaac Trotts and
 on Haskell kd-tree code by Matthew Sottile.
 
-Copyright 2013 Ivan Raikov and the Okinawa Institute of
-Science and Technology.
+Copyright 2013-2016 Ivan Raikov.
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
