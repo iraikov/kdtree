@@ -101,7 +101,7 @@ sig
     val coord: point -> int -> real
     val pointCoord: pointSpace -> (int * int) -> real
     val size: pointSpace -> int
-    
+    val extend1: real list * pointSpace -> pointSpace * int
 end
 
 (* Point space based on tensors *)
@@ -112,12 +112,22 @@ struct
 
     type point = RTensorSlice.slice
 
-    type pointSpace = RTensor.tensor
+    datatype pointSpace = 
+             PsLeaf of int * RTensor.tensor
+             | PsNode of int * RTensor.tensor * pointSpace
+
+    val nodeSize = Word.fromInt (Word.<<(0wx1, 0wx10))
                         
     val K = K
             
-    fun point P i = RTensorSlice.fromto ([i,0],[i,K-1],P)
-                    
+    fun point (PsLeaf (size,P)) i = RTensorSlice.fromto ([i,0],[i,K-1],P)
+      | point (PsNode (lb,left,right)) i = 
+        if (i > lb) then point left i else point right (i-lb)
+        
+    fun pointCoord (PsLeaf (size,P)) (i,c) = RTensor.sub (P,[i,c])
+      | pointCoord (PsNode (lsize,left,rsize,right)) (i,c) =
+        if (i < lsize) then pointCoord left (i,c) else pointCoord right (i-lsize,c)
+
     fun pointList p = List.rev (RTensorSlice.foldl (op ::) [] p)
                       
     fun coord point = 
@@ -133,11 +143,34 @@ struct
                  else raise Point)
               | _ => raise Point
         end
-        
-        
-    fun pointCoord P (i,c) = RTensor.sub (P,[i,c])
                              
-    fun size P = hd (RTensor.shape P)
+    fun size (PsLeaf (size,P)) = size
+      | size (PsNode (lsize,left,rsize,right)) = lsize + rsize
+
+    fun capacity (PsLeaf (size,P)) = hd (RTensor.shape P)
+      | capacity (PsNode (lsize,left,rsize,right)) = (capacity left) + (capacity right)
+
+    fun height (PsLeaf (size,P)) = 0
+      | height (PsNode (lsize,left,rsize,right)) = (height left) + (height right) + 1
+
+    fun hasCapacityLeft P = (size P) < (capacity P)
+
+    fun new sz = PsLeaf (0,RTensor.new([sz,K],0.0))
+
+    fun join (P as PsNode (lsize,ll as PsNode _,rsize,lr as PsLeaf _), P' as PsLeaf _) = 
+        PsNode (lsize,ll,rsize+(size P'),join (lr, P'))
+      | join (P, P') = PsNode (size P,P,size P',P')
+
+    fun extend1 (point, P) =
+        if hasCapacityLeft P 
+        then insert1 (point, P)
+        else (let
+                 val P' = new nodeSize
+                 val root = join (P, P')
+             in
+                 
+             end)
+
                  
 end
 
@@ -173,7 +206,6 @@ val isValid: kdtree -> bool
 
 val allSubtreesAreValid: kdtree -> bool
 
-val fromPoints: pointSpace -> kdtree
 
 val nearestNeighbor: kdtree -> real list -> int option
 
@@ -185,6 +217,7 @@ val kNearestNeighbors: kdtree -> int -> real list -> int list
 
 val rangeSearch: kdtree -> (int * int) -> int list
 
+val fromPoints: pointSpace -> kdtree
 
 (*val addPoint: point * kdtree -> kdtree*)
 
@@ -696,9 +729,9 @@ fun fromPointsWithDepth P I depth =
       fun rangeSearch t (bMin, bMax) = rangeSearch' t (bMin, bMax) []
 
 
-(*
-   fun addPointWithDepth {P,T} p = 
+   fun addPointWithDepth {P,T} point depth = 
        let
+           val (P',pidx)    = S.extend1 (point, P)
            val sub          = Unsafe.IntArray.sub
            val pointCoord'  = S.pointCoord P
        in
@@ -721,7 +754,6 @@ fun fromPointsWithDepth P I depth =
                             else KdLeaf {ii=IntVector.cons (pid,ii),axis=axis})
                    end)
          | KdNode {left,i,right,axis} => 
-*)           
 
 
 end
