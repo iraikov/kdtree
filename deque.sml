@@ -7,10 +7,13 @@ sig
   val empty   : 'a Queue
   val isEmpty : 'a Queue -> bool
 
-  val snoc    : 'a Queue * 'a -> 'a Queue
-  val head    : 'a Queue -> 'a         (* raises Empty if queue is empty *)
-  val tail    : 'a Queue -> 'a Queue   (* raises Empty if queue is empty *)
+  val enqueue  : 'a * 'a Queue  -> 'a Queue
+  val hd    : 'a Queue -> 'a         (* raises Empty if queue is empty *)
+  val tl    : 'a Queue -> 'a Queue   (* raises Empty if queue is empty *)
+
+  val map    : ('a -> 'b) -> 'a Queue -> 'b Queue   (* raises Empty if queue is empty *)
 end
+
 
 structure HoodMelvilleQueue : QUEUE =
 struct
@@ -48,13 +51,20 @@ struct
   val empty = (0, [], Idle, 0, [])
   fun isEmpty (lenf, f, state, lenr, r) = (lenf = 0)
 
-  fun snoc ((lenf, f, state, lenr, r), x) = 
+  fun enqueue (x, (lenf, f, state, lenr, r)) = 
       check (lenf,f,state,lenr+1,x::r)
 
-  fun head (lenf, [], state, lenr, r) = raise Empty
-    | head (lenf, x :: f, state, lenr, r) = x
+  fun hd (lenf, [], state, lenr, r) = raise Empty
+    | hd (lenf, x :: f, state, lenr, r) = x
 
-  fun tail (lenf, [], state, lenr, r) = raise Empty
-    | tail (lenf, x :: f, state, lenr, r) =
+  fun tl (lenf, [], state, lenr, r) = raise Empty
+    | tl (lenf, x :: f, state, lenr, r) =
       check (lenf-1, f, invalidate state, lenr, r)
+
+  fun map1 f que ax =
+      if isEmpty que then ax else map1 f (tl que) (enqueue (f (hd que), ax))
+
+  fun map f que = map1 f que empty
+
+                       
 end
