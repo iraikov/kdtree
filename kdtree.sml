@@ -101,32 +101,38 @@ sig
     val coord: point -> int -> real
     val pointCoord: pointSpace -> (int * int) -> real
     val size: pointSpace -> int
-    val extend1: real list * pointSpace -> pointSpace * int
+    val extend1: real list * pointSpace -> int * pointSpace
 end
 
 (* Point space based on tensors *)
 functor TensorPointSpaceFn (val K : int): KPOINT_SPACE =
 struct
 
+    open SplayTree
+
     exception Point
 
     type point = RTensorSlice.slice
 
-    datatype pointSpace = 
-             PsLeaf of int * RTensor.tensor
-             | PsNode of int * RTensor.tensor * pointSpace
+    type pointSpaceNode = int ref * int * RTensor.tensor
 
-    val nodeSize = Word.fromInt (Word.<<(0wx1, 0wx10))
+    val nodeSize = Word.toInt (Word.<<(0wx1, 0wx10))
                         
     val K = K
             
-    fun point (PsLeaf (size,P)) i = RTensorSlice.fromto ([i,0],[i,K-1],P)
-      | point (PsNode (lb,left,right)) i = 
-        if (i > lb) then point left i else point right (i-lb)
-        
-    fun pointCoord (PsLeaf (size,P)) (i,c) = RTensor.sub (P,[i,c])
-      | pointCoord (PsNode (lsize,left,rsize,right)) (i,c) =
-        if (i < lsize) then pointCoord left (i,c) else pointCoord right (i-lsize,c)
+    fun point (SplayObj {(sz,lb,te), right, left}) i = 
+        if (i >= lb) 
+        then (if i < (lb + sz) then RTensorSlice.fromto ([i-lb,0],[i-lb,K-1],te) else point right i) 
+        else point left i
+      | point (SplayNil) i = 
+        raise Point
+                                                  
+    fun pointCoord (SplayObj {(sz,lb,te), right, left}) (i,c) = 
+        if (i >= lb) 
+        then (if i < (lb + sz) then RTensor.sub (te,[i-lb,c]) else pointCoord right i) 
+        else pointCoord left i
+      | pointCoord (SplayNil) (i,c) =
+        raise Point
 
     fun pointList p = List.rev (RTensorSlice.foldl (op ::) [] p)
                       
@@ -142,31 +148,30 @@ struct
                  then (fn (i) => RTensor.sub(base,[p,i]))
                  else raise Point)
               | _ => raise Point
+
         end
                              
-    fun size (PsLeaf (size,P)) = size
-      | size (PsNode (lsize,left,rsize,right)) = lsize + rsize
+    fun size (SplayObj {(sz,lb,te), right, left}) = sz + (size left) + (size right)
+      | size (SplayNil) = 0
 
-    fun capacity (PsLeaf (size,P)) = hd (RTensor.shape P)
-      | capacity (PsNode (lsize,left,rsize,right)) = (capacity left) + (capacity right)
+    fun capacity (SplayObj {(sz,lb,te), right, left}) = 
+        (hd (RTensor.shape te)) + (capacity left) + (capacity right)
+      | capacity (SplayNil) = 0
 
-    fun height (PsLeaf (size,P)) = 0
-      | height (PsNode (lsize,left,rsize,right)) = (height left) + (height right) + 1
+    fun height (SplayObj {value=(sz,lb,te), right, left}) = 1 + Int.max(height left,height right)
+      | height (SplayNil) = 0
 
     fun hasCapacityLeft P = (size P) < (capacity P)
 
-    fun new sz = PsLeaf (0,RTensor.new([sz,K],0.0))
-
-    fun join (P as PsNode (lsize,ll as PsNode _,rsize,lr as PsLeaf _), P' as PsLeaf _) = 
-        PsNode (lsize,ll,rsize+(size P'),join (lr, P'))
-      | join (P, P') = PsNode (size P,P,size P',P')
+    fun new (lb,cap) = SplayObj {value=(ref 0,lb,RTensor.new([cap,K])),right=SplayNil,left=SplayNil}
 
     fun extend1 (point, P) =
         if hasCapacityLeft P 
         then insert1 (point, P)
         else (let
-                 val P' = new nodeSize
-                 val root = join (P, P')
+                 val sz   = size P
+                 val node = new (sz+1,nodeSize)
+                 val P'   = splay(,join(P,node))
              in
                  
              end)
