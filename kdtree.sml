@@ -96,16 +96,95 @@ sig
     type pointSpace
 
     val K : int
+    val empty: pointSpace
     val point: pointSpace -> int -> point
     val pointList: point -> real list
     val coord: point -> int -> real
     val pointCoord: pointSpace -> (int * int) -> real
     val size: pointSpace -> int
-    val extend1: real list * pointSpace -> int * pointSpace
+    val insert: real list * pointSpace -> int * pointSpace
 end
+
 
 (* Point space based on tensors *)
 functor TensorPointSpaceFn (val K : int): KPOINT_SPACE =
+struct
+
+    exception Point
+    exception NotImplemented
+
+    type point = RTensorSlice.slice
+
+    type pointSpace = RTensor.tensor
+                        
+    val K = K
+
+    val empty = RTensor.new ([1,K], 0.0)
+            
+    fun point P i = RTensorSlice.fromto ([i,0],[i,K-1],P)
+                    
+    fun pointList p = List.rev (RTensorSlice.foldl (op ::) [] p)
+                      
+    fun coord point = 
+        let val base  = RTensorSlice.base point 
+            val shape = hd (RTensorSlice.shapes point)
+            val lo    = Range.first (RTensorSlice.range point)
+            val hi    = Range.last (RTensorSlice.range point)
+        in
+            case (shape,lo,hi) of
+                ([1,n],[p,0],[p',n']) => 
+                (if ((p=p') andalso (n=n'+1))
+                 then (fn (i) => RTensor.sub(base,[p,i]))
+                 else raise Point)
+              | _ => raise Point
+        end
+        
+        
+    fun pointCoord P (i,c) = RTensor.sub (P,[i,c])
+    fun size P = hd (RTensor.shape P)
+                 
+    fun insert (point, P) = raise NotImplemented
+end
+
+
+(* Point space based on maps *)
+functor MapPointSpaceFn (val K : int): KPOINT_SPACE =
+struct
+
+    exception Point
+    exception NotImplemented
+
+    type point = real list
+
+    structure H = RedBlackMapFn (struct
+			          type ord_key = int
+			          val compare = Int.compare
+			          end)
+					    
+    type pointSpace = point H.map
+
+    fun insert (m, k, a) = H.insert(m, k, a)
+    fun find (m, k) = H.lookup(m, k)
+                        
+    val K = K
+            
+    fun point P i = find (P,i)
+                    
+    fun pointList p = p
+                      
+    fun coord point i = List.nth (point, i)
+        
+    fun pointCoord P (i,c) = coord (find (P,i)) c
+    fun size P = H.numItems(P)
+                 
+    val empty = H.empty
+    fun insert (point, P) = let val i = size P in (i, H.insert(P, i, point)) end
+end
+
+
+(* Extensible point space based on a splay tree of tensors *)
+(*
+functor SplayTensorPointSpaceFn (val K : int): KPOINT_SPACE =
 struct
 
     open SplayTree
@@ -178,7 +257,7 @@ struct
 
                  
 end
-
+*)
 
 signature KDTREE = 
 sig
@@ -186,6 +265,10 @@ sig
 type point
 type pointSpace
 type kdtree
+
+structure S: KPOINT_SPACE
+
+val pointSpace: kdtree -> S.pointSpace
 
 val isEmpty: kdtree -> bool
 
@@ -235,6 +318,7 @@ functor KDTreeFn (
 struct
 
 structure IntArraySort = ArrayMergeSortFn (IntArray)
+structure S = S
 
 type point = S.point
 type pointSpace = S.pointSpace
@@ -249,6 +333,8 @@ exception Point
 exception IndexArray
 
 val K = S.K
+
+fun pointSpace { P: pointSpace, T: kdtree' } = P
 
 fun compareDistance reltol probe (a,b) = 
     let
@@ -733,7 +819,7 @@ fun fromPointsWithDepth P I depth =
 
       fun rangeSearch t (bMin, bMax) = rangeSearch' t (bMin, bMax) []
 
-
+(*
    fun addPointWithDepth {P,T} point depth = 
        let
            val (P',pidx)    = S.extend1 (point, P)
@@ -759,6 +845,6 @@ fun fromPointsWithDepth P I depth =
                             else KdLeaf {ii=IntVector.cons (pid,ii),axis=axis})
                    end)
          | KdNode {left,i,right,axis} => 
-
+*)
 
 end
