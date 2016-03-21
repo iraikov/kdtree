@@ -40,6 +40,77 @@
 *)
 
 
+(* A heap that maintains constant-time access to its minimum and median elements. *)
+functor MedianHeap  (P : PRIORITY) =
+struct
+
+structure RH = SkewBinomialHeap (structure P = P)
+structure LH = SkewBinomialHeap (structure P = P')
+
+datatype heap = HNode of { left: LH.heap, leftNum: int, min: P.item, median: P.item, right: RH.heap, rightNum: int } | HEmpty
+
+val empty = HEmpty
+fun isEmpty (HEmpty) = true | isEmpty (HNode _) = false
+
+fun rebalanceRight (HNode { left, leftNum, min, median, right, rightNum }) =
+    let val right'  = H.insert(median, right)
+        val leftMax = valOf(H.findMin left)
+        val left'   = valOf(H.removeMin left)
+    in
+        HNode {left=left', leftNum=leftNum-1, min=min, median=leftMax, right=right', rightNum=rightNum+1}
+    end
+
+
+fun rebalanceLeft (HNode { left, leftNum, min, median, right, rightNum }) =
+    let val right'   = valOf(H.removeMin right)
+        val rightMin = valOf(H.findMin right)
+        val left'    = H.insert(median, left)
+    in
+        HNode {left=left', leftNum=leftNum+1, min=min, median=rightMin, right=right', rightNum=rightNum-1}
+    end
+
+
+fun insert (item, HNode { left, leftNum, min, median, right, rightNum }) =
+    let val h' = 
+            case P.compare (P.priority item, P.priority median) of
+                GREATER => 
+                (let val right' = H.insert(item, right)
+                 in
+                     HNode {left=left,leftNum=leftNum,min=min,median=median,right=right',rightNum=rightNum+1}
+                 end)
+              | _ => 
+                (let val left' = H.insert(item,left)
+                     val min' = case P.compare (min, item) of
+                                    GREATER => item 
+                                  | _ => min
+                 in 
+                     HNode {left=left',leftNum=leftNum+1,min=min',median=rightMin',right=right',rightNum=rightNum}
+                 end)
+    in
+        case h' of 
+            HNode { left, leftNum, min, median, right, rightNum } =>
+            if leftNum > rightNum
+            then rebalanceRight h'
+            else (if leftNum < rightNum
+                  then rebalanceLeft h' else h')
+          | HEmpty => raise Empty
+    end
+
+fun findMedian (HNode { left, leftMax, median, right }) = median
+  | findMedian (HEmpty) = raise Empty
+
+
+fun findMin (HNode { left, leftMax, median, right }) = 
+    case H.findMin left of 
+        NONE => median
+      | SOME item => item 
+  | findMin (HEmpty) = raise Empty
+
+
+
+end
+
+
 structure IntVectorUtils =
 struct
 
@@ -244,9 +315,9 @@ struct
 
     fun new (lb,cap) = SplayObj {value=(ref 0,lb,RTensor.new([cap,K])),right=SplayNil,left=SplayNil}
 
-    fun extend1 (point, P) =
+    fun insert (point, P) =
         if hasCapacityLeft P 
-        then insert1 (point, P)
+        then insert (point, P)
         else (let
                  val sz   = size P
                  val node = new (sz+1,nodeSize)
@@ -307,7 +378,7 @@ val rangeSearch: kdtree -> (int * int) -> int list
 
 val fromPoints: pointSpace -> kdtree
 
-(*val addPoint: point * kdtree -> kdtree*)
+val addPoint: point * kdtree -> kdtree
 
 end
 
@@ -586,6 +657,33 @@ fun fromPointsWithDepth P I depth =
     
    fun fromPoints P = {P=P,T=(fromPointsWithDepth P NONE 0)}
 
+   fun addPointWithDepth {P,T} point depth = 
+       let
+           val (P',pidx)    = S.insert (point, P)
+           val sub          = Unsafe.IntArray.sub
+           val pointCoord'  = S.pointCoord P'
+       in
+           case T of
+               KdLeaf {ii,axis} => 
+               if IntVector.length (ii) = 0
+               then KdLeaf {ii=IntVector.fromList [pidx],axis=axis}
+               else
+                   (let 
+                       val pcx = S.coord point axis
+                       val e   = (IntVector.length ii)-1
+                       val ecx = pointCoord' (sub (I, IntVector.sub(ii,e)), axis)
+                       val scx = pointCoord' (sub (I, IntVector.sub(ii,0)), axis)
+                   in
+                       if pcx > ecx
+                       then KdNode {left=left,i=sub(I',pidx),right=right,axis=axis}
+                       else 
+                           (if pcx < ecx
+                            then KdNode {left=left,i=sub(I',median),right=right,axis=axis}
+                            else KdLeaf {ii=IntVector.cons (pidx,ii),axis=axis})
+                   end)
+         | KdNode {left,i,right,axis} => 
+
+
    (* Returns the index of the nearest neighbor of p in tree t. *)
 
    fun nearestNeighbor {P,T} probe =
@@ -819,32 +917,5 @@ fun fromPointsWithDepth P I depth =
 
       fun rangeSearch t (bMin, bMax) = rangeSearch' t (bMin, bMax) []
 
-(*
-   fun addPointWithDepth {P,T} point depth = 
-       let
-           val (P',pidx)    = S.extend1 (point, P)
-           val sub          = Unsafe.IntArray.sub
-           val pointCoord'  = S.pointCoord P
-       in
-           case T of
-               KdLeaf {ii,axis} => 
-               if IntVector.length (ii) = 0
-               then KdLeaf {ii=IntVector.fromList [i],axis=axis}
-               else
-                   (let 
-                       val e   = (IntVector.length ii)-1
-                       val ecx = pointCoord' (sub (I, IntVector.sub(ii,e)), axis)
-                       val scx = pointCoord' (sub (I, IntVector.sub(ii,0)), axis)
-                       val pcx = S.coord p axis
-                   in
-                       if pcx > ecx
-                       then KdNode {left=left,i=sub(I',pi),right=right,axis=axis}
-                       else 
-                           (if pcx < ecx
-                            then KdNode {left=left,i=sub(I',median),right=right,axis=axis}
-                            else KdLeaf {ii=IntVector.cons (pid,ii),axis=axis})
-                   end)
-         | KdNode {left,i,right,axis} => 
-*)
 
 end
