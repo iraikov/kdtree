@@ -819,10 +819,9 @@ fun fromPointsWithDepth P I depth =
 
       fun rangeSearch t (bMin, bMax) = rangeSearch' t (bMin, bMax) []
 
-(*
    fun addPointWithDepth {P,T} point depth = 
        let
-           val (P',pidx)    = S.extend1 (point, P)
+           val (P',pidx)    = S.insert (point, P)
            val sub          = Unsafe.IntArray.sub
            val pointCoord'  = S.pointCoord P
        in
@@ -832,19 +831,17 @@ fun fromPointsWithDepth P I depth =
                then KdLeaf {ii=IntVector.fromList [i],axis=axis}
                else
                    (let 
-                       val e   = (IntVector.length ii)-1
-                       val ecx = pointCoord' (sub (I, IntVector.sub(ii,e)), axis)
-                       val scx = pointCoord' (sub (I, IntVector.sub(ii,0)), axis)
-                       val pcx = S.coord p axis
+                       val midp  = IntVector.sub(ii,int.mod(IntVector.length ii,2))
+                       val midcx = pointCoord' (sub (I, midp), axis)
+                       val pcx   = S.coord point axis
                    in
-                       if pcx > ecx
-                       then KdNode {left=left,i=sub(I',pi),right=right,axis=axis}
+                       if pcx > midcx
+                       then KdNode {left=left,i=midp,right=right,axis=axis}
                        else 
                            (if pcx < ecx
                             then KdNode {left=left,i=sub(I',median),right=right,axis=axis}
                             else KdLeaf {ii=IntVector.cons (pid,ii),axis=axis})
                    end)
          | KdNode {left,i,right,axis} => 
-*)
 
 end
