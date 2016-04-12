@@ -141,13 +141,13 @@ val pts = let
 
 
 
-val _ = print ("constructing map tree...\n")
-val (mt,ti)  = timing (fn () => MapKDTree.fromPoints PM)
-val _ = print ("map tree constructed (" ^ (Time.toString ti) ^ " s)\n")
-
 val _ = print ("constructing tensor tree...\n")
 val (tt,ti)  = timing (fn () => TensorKDTree.fromPoints P)
 val _ = print ("tensor tree constructed (" ^ (Time.toString ti) ^ " s)\n")
+
+val _ = print ("constructing map tree...\n")
+val (mt,ti)  = timing (fn () => MapKDTree.fromPoints PM)
+val _ = print ("map tree constructed (" ^ (Time.toString ti) ^ " s)\n")
 
 
 val _ = print ("tensor tree size = " ^ (Int.toString (TensorKDTree.size tt)) ^ "\n")

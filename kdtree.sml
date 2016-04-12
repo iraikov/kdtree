@@ -40,26 +40,6 @@
 *)
 
 
-(*
-We keep two heaps which divides the entered number in two almost
-equal halves. Half of the number would be greater than the median and
-the rest would be lesser. The upper half will be maintained in a min
-heap and the lower half will be maintained in a max heap. In this
-arrangement we can find out in O(1) time whether a new number would go
-to the upper half or lower half. All we need to do is to compare the
-new number with the head of two heaps. After deciding we can insert in
-a heap in O(log n) time. After this insertion if the heaps are
-unbalanced, we can just move from one heap to another. which is again
-of O(log n) complexity. And now we can find the median in O(1)
-time. If two heaps contain same number of elements then median is the
-average of the head of two heaps. If one is greater, then median is
-the head of the larger heap.
-*)
-
-structure RunningMedian = 
-struct
-end
-
 structure ListUtils =
 struct
 
@@ -266,6 +246,8 @@ val pointSpace: kdtree -> S.pointSpace
 
 val isEmpty: kdtree -> bool
 
+val empty: kdtree
+
 val app: (point -> unit) -> kdtree -> unit
 val appi: (int * point -> unit)  -> kdtree -> unit
 
@@ -301,7 +283,7 @@ val rangeSearch: kdtree -> (int * int) -> int list
 
 val fromPoints: pointSpace -> kdtree
 
-val addPoint: point * kdtree -> kdtree
+val addPoint: real list * kdtree -> kdtree
 
 end
 
@@ -318,7 +300,7 @@ type pointSpace = S.pointSpace
 
 datatype kdtree' =
          KdNode of { left: kdtree', i: int, right: kdtree', axis: int }
-       | KdLeaf of { ii: int list, axis: int, median: real }
+       | KdLeaf of { ii: int list, axis: int }
 
 type kdtree = { P: pointSpace, T: kdtree' }
 
@@ -342,13 +324,12 @@ fun compareDistance reltol probe (a,b) =
                              then LESS else (if Real.> (delta, 0.0) then GREATER else EQUAL)))
     end
 
-
+val empty = { P = S.empty, T = KdLeaf { ii=[], axis=0 } }
 
 fun isEmpty' T =
     case T of
         KdNode _         => false
-      | KdLeaf {ii,axis,median} => List.null ii
-    
+      | KdLeaf {ii,axis} => (List.length ii)=0
 
 fun isEmpty {P,T} = isEmpty' T
 
@@ -359,7 +340,7 @@ fun app f {P,T} =
         fun app' T =
             case T of 
                 KdNode {left,i,right,axis} => (app' left; f (p i); app' right)
-              | KdLeaf {ii,axis,median} => app (fn i => f (p i)) ii
+              | KdLeaf {ii,axis}           => List.app (fn i => f (p i)) ii
     in
         app' T
     end
@@ -371,7 +352,7 @@ fun appi f {P,T} =
         fun appi' T =
             case T of 
                 KdNode {left,i,right,axis} => (appi' left; f (i, p i); appi' right)
-              | KdLeaf {ii,axis,median}  => app (fn i => f (i, p i)) ii
+              | KdLeaf {ii,axis}           => List.app (fn i => f (i, p i)) ii
     in
         appi' T
     end
@@ -382,10 +363,12 @@ fun foldl f init {P,T} =
         val p = S.point P
         fun foldl' init T =
             case T of 
-                KdNode {left,i,right,axis} => (let val init' = foldl' init left
-                                                   val init''= f (p i, init')
-                                               in foldl' init'' right end)
-              | KdLeaf {ii,axis,median} => foldl (fn (i,ax) => f (p i, ax)) init ii
+                KdNode {left,i,right,axis} => 
+                (let val init' = foldl' init left
+                     val init''= f (p i, init')
+                 in foldl' init'' right end)
+              | KdLeaf {ii,axis}           => 
+                List.foldl (fn (i,ax) => f (p i, ax)) init ii
     in
         foldl' init T
     end
@@ -396,10 +379,12 @@ fun foldli f init {P,T} =
         val p = S.point P
         fun foldli' init T =
             case T of 
-                KdNode {left,i,right,axis} => (let val init' = foldli' init left
-                                                   val init''= f (i, p i, init')
-                                               in foldli' init'' right end)
-              | KdLeaf {ii,axis,median} => foldl (fn (i,ax) => f (i, p i, ax)) init ii
+                KdNode {left,i,right,axis} => 
+                (let val init' = foldli' init left
+                     val init''= f (i, p i, init')
+                 in foldli' init'' right end)
+              | KdLeaf {ii,axis}           => 
+                List.foldl (fn (i,ax) => f (i, p i, ax)) init ii
     in
         foldli' init T
     end
@@ -410,10 +395,12 @@ fun foldr f init {P,T} =
         val p = S.point P
         fun foldr' init T =
             case T of 
-                KdNode {left,i,right,axis} => (let val init' = foldr' init right
-                                                   val init''= f (p i, init')
-                                               in foldr' init'' left end)
-              | KdLeaf {ii,axis,median} => foldr (fn (i,ax) => f (p i, ax)) init ii
+                KdNode {left,i,right,axis} => 
+                (let val init' = foldr' init right
+                     val init''= f (p i, init')
+                 in foldr' init'' left end)
+              | KdLeaf {ii,axis}           => 
+                List.foldr (fn (i,ax) => f (p i, ax)) init ii
     in
         foldr' init T
     end
@@ -424,10 +411,12 @@ fun foldri f init {P,T} =
         val p = S.point P
         fun foldri' init T =
             case T of 
-                KdNode {left,i,right,axis} => (let val init'  = foldri' init right
-                                                   val init'' = f (i, p i, init')
-                                               in foldri' init'' left end)
-              | KdLeaf {ii,axis,median} => foldr (fn (i,ax) => f (i, p i, ax)) init ii
+                KdNode {left,i,right,axis} => 
+                (let val init'  = foldri' init right
+                     val init'' = f (i, p i, init')
+                 in foldri' init'' left end)
+              | KdLeaf {ii,axis}           => 
+                List.foldr (fn (i,ax) => f (i, p i, ax)) init ii
     in
         foldri' init T
     end
@@ -437,10 +426,12 @@ fun ifoldr f init {P,T} =
     let
         fun foldr' init T =
             case T of 
-                KdNode {left,i,right,axis} => (let val init' = foldr' init right
-                                                   val init''= f (i, init')
-                                               in foldr' init'' left end)
-              | KdLeaf {ii,axis,median} => foldr (fn (i,ax) => f (i, ax)) init ii
+                KdNode {left,i,right,axis} => 
+                (let val init' = foldr' init right
+                     val init''= f (i, init')
+                 in foldr' init'' left end)
+              | KdLeaf {ii,axis}           => 
+                List.foldr (fn (i,ax) => f (i, ax)) init ii
     in
         foldr' init T
     end
@@ -456,8 +447,10 @@ fun subtrees {P,T} =
     let
         fun subtrees' T = 
             case T of 
-                KdNode {left,i,right,axis} => (subtrees' left) @ [T] @ (subtrees' right)
-              | KdLeaf {ii,axis,median} => [T]
+                KdNode {left,i,right,axis} => 
+                (subtrees' left) @ [T] @ (subtrees' right)
+              | KdLeaf {ii,axis}           => 
+                [T]
     in
         subtrees' T
     end
@@ -541,9 +534,8 @@ fun fromPointsWithDepth P I depth =
                  if (k <= bucketSize) orelse (k <= 1)
                  then 
                      let
-                         val sl = IntArraySlice.slice (I, m, SOME (k+1))
-                         val ii = IntArraySlice.foldr (op ::) sl
-                         val axis = Int.mod (depth, K)
+                         val ii  = IntArraySlice.foldr (op ::) [] 
+                                                       (IntArraySlice.slice (I, m, SOME (k+1)))
                      in
                          KdLeaf {ii=ii, axis=axis, 
                                  median=pointCoord' (IntArraySlice.sub(sl,Int.mod(k,2)), axis)}
@@ -561,24 +553,15 @@ fun fromPointsWithDepth P I depth =
                                                                                                                                         
                                    val left  = fromPointsWithDepth' (I',m,median-1,depth')
                                    val right = fromPointsWithDepth' (I',median+1,n,depth')
-
-                                           
                                in
-                                   KdNode {left=left,i=sub(I',median),right=right,axis=axis}
+                                   KdNode {left=left,i=sub(I',median),
+                                           right=right,axis=axis}
                                end)
-                            | NONE => 
-                              let
-                                  val sl = IntArraySlice.slice (I, m, SOME (k+1))
-                                  val ii = IntArraySlice.foldr (op ::) sl
-                                  val axis = Int.mod (depth, K)
-                              in
-                                  KdLeaf {ii=ii, axis=axis,
-                                          median=pointCoord' (IntArraySlice.sub(sl,Int.mod(k,2)), axis)}
-                              end
-                                  
-                     end)
-            end)
-
+                            | NONE => (KdLeaf {ii=IntArraySlice.foldr (op ::) []
+                                                  (IntArraySlice.slice (I, m, SOME (k+1))),  
+                                               axis=Int.mod (depth, K)})
+                      end)
+             end)
     in
         if sz=0 
         then KdLeaf {ii=[], axis=Int.mod (depth, K)}
@@ -680,7 +663,7 @@ fun fromPointsWithDepth P I depth =
            and nearestNeighbor' t =
                case t of
 
-                   KdLeaf { ii, axis, median } => 
+                   KdLeaf { ii, axis } => 
                    ListUtils.minimumBy ii compareDistance''
                    
                  | KdNode { left, i, right, axis } => 
@@ -705,9 +688,7 @@ fun fromPointsWithDepth P I depth =
            val point'      = S.point P
            val pointCoord' = S.pointCoord P
            val r2          = Real.* (radius, radius)
-           fun filterIndices ii = List.filter 
-                                      (fn (i) => (Real.<= (distance (probe, S.pointList (point' i)), r2)))
-                                      ii
+           fun filterIndices ii = List.filter (fn (i) => (Real.<= (distance (probe, S.pointList (point' i)), r2))) ii
 
            fun nearNeighbors' t =
                case t of
@@ -756,15 +737,13 @@ fun fromPointsWithDepth P I depth =
            val point'      = S.point P
            val pointCoord' = S.pointCoord P
            val tol2        = Real.* (tol, tol)
-           fun filterIndices ii = List.filter 
-                                      (fn (i) => (Real.> (distance (pkill, S.pointList (point' i)), tol2)))
-                                      ii
+           fun filterIndices ii = List.filter (fn (i) => (Real.> (distance (pkill, S.pointList (point' i)), tol2))) ii
 
 	   fun remove' t =
                case t of
                    
-                   KdLeaf { ii, axis, median } => 
-                   KdLeaf { ii = filterIndices ii, axis = axis, median = }
+                   KdLeaf { ii, axis } => 
+                   KdLeaf { ii = filterIndices ii, axis = axis }
                                       
 	         | KdNode { left, i, right, axis } =>
                    if (Real.> (distance (pkill, S.pointList (point' i)), tol2))
@@ -848,8 +827,8 @@ fun fromPointsWithDepth P I depth =
                       val inBounds' = inBounds (xMin, xMax)
                   in
                       if Real.< (xMin, xMax) andalso 
-                         Real.>= (xMax, pointCoord' (IntVector.sub(ii,0), axis))  andalso
-                         Real.<= (xMin, pointCoord' (IntVector.sub(ii,(IntVector.length ii)-1), axis))
+                         Real.>= (xMax, pointCoord' (List.hd ii, axis))  andalso
+                         Real.<= (xMin, pointCoord' (List.last ii, axis))
                       then (List.filter (fn (x) =>  inBounds' (pointCoord' (x, axis))) ii) @ ax
                       else ax
                   end)
@@ -874,5 +853,64 @@ fun fromPointsWithDepth P I depth =
 
       fun rangeSearch t (bMin, bMax) = rangeSearch' t (bMin, bMax) []
 
+
+      fun addPoint' (P,T,j) = 
+          let
+              val pointCoord  = S.pointCoord P
+              fun removeMax (KdLeaf {ii, axis}) =
+                  (let val n = List.length ii
+                   in 
+                       (KdLeaf {ii=List.take (ii, n-1),axis=axis}, List.last ii)
+                   end)
+                  | removeMax (KdNode {left, i, right=KdLeaf {ii=[],axis=_}, axis}) =
+                    (left, i)
+                  | removeMax (KdNode {left, i, right, axis}) =
+                    let 
+                        val (right',i') = removeMax right
+                    in
+                        (KdNode {left=left,i=i,right=right',axis=axis}, i')
+                    end
+          in
+              case T of
+                  KdLeaf {ii,axis} => 
+                  (case ii of
+                       []  => KdLeaf {ii=[j],axis=axis}
+                     | [i] => (let val ii' = if pointCoord (i, axis) < pointCoord (j, axis)
+                                             then [i, j] else [j, i]
+                               in
+                                   KdLeaf {ii=ii',axis=axis}
+                               end)
+                     | _   => (let 
+                                  val ii'     = ListMergeSort.sort (fn(i,j) => pointCoord (i, axis) < pointCoord (j,axis)) (j :: ii)
+                                  val axis'   = Int.mod (axis+1, K)
+                                  val median  = List.nth (ii', Int.quot(List.length ii', 2))
+                                  val medianc = pointCoord (median, axis)
+                                  val (ii_left, ii_right) = List.partition (fn(i) => pointCoord (i,axis) < medianc) ii'
+                                  val left  = KdLeaf {ii=ii_left, axis=axis'}
+                                  val right = KdLeaf {ii=ii_right, axis=axis'}
+                              in
+                                  KdNode {left=left,i=median,right=right,axis=axis}
+                              end))
+                | KdNode {left,i,right,axis} => 
+                  if pointCoord (j, axis) < pointCoord (i, axis)
+                  then (let val (left', i') = removeMax (addPoint' (P,left,j))
+                            val right' = addPoint' (P,right,i)
+                        in
+                            KdNode{left=left',i=i',right=right',axis=axis}
+                        end)
+                  else (let val (right', i') = removeMax (addPoint' (P,right,j))
+                            val left' = addPoint' (P,right,i)
+                        in
+                            KdNode{left=left',i=i',right=right',axis=axis}
+                        end)
+          end
+                           
+                           
+      fun addPoint (point, {P,T}) =
+          let
+              val (pidx,P') = S.insert (point, P)
+          in
+              {P=P', T=addPoint' (P',T,pidx)}
+          end
 
 end
