@@ -302,14 +302,14 @@ datatype kdtree' =
          KdNode of { left: kdtree', i: int, right: kdtree', axis: int }
        | KdLeaf of { ii: int list, axis: int }
 
-type kdtree = { P: pointSpace, T: kdtree' }
+type kdtree = { P: pointSpace, T: kdtree' list }
 
 exception Point
 exception IndexArray
 
 val K = S.K
 
-fun pointSpace { P: pointSpace, T: kdtree' } = P
+fun pointSpace { P: pointSpace, T: kdtree' list } = P
 
 fun compareDistance reltol probe (a,b) = 
     let
@@ -324,12 +324,13 @@ fun compareDistance reltol probe (a,b) =
                              then LESS else (if Real.> (delta, 0.0) then GREATER else EQUAL)))
     end
 
-val empty = { P = S.empty, T = KdLeaf { ii=[], axis=0 } }
+val empty = { P = S.empty, T = [KdLeaf { ii=[], axis=0 }] }
 
 fun isEmpty' T =
-    case T of
-        KdNode _         => false
-      | KdLeaf {ii,axis} => (List.length ii)=0
+    List.all (fn (t) => 
+                 case t of
+                     KdNode _         => false
+                   | KdLeaf {ii,axis} => (List.length ii)=0) T
 
 fun isEmpty {P,T} = isEmpty' T
 
@@ -337,40 +338,40 @@ fun isEmpty {P,T} = isEmpty' T
 fun app f {P,T} =
     let
         val p = S.point P
-        fun app' T =
-            case T of 
+        fun app' t =
+            case t of 
                 KdNode {left,i,right,axis} => (app' left; f (p i); app' right)
               | KdLeaf {ii,axis}           => List.app (fn i => f (p i)) ii
     in
-        app' T
+        List.app app' T
     end
 
 
 fun appi f {P,T} =
     let
         val p = S.point P
-        fun appi' T =
-            case T of 
+        fun appi' t =
+            case t of 
                 KdNode {left,i,right,axis} => (appi' left; f (i, p i); appi' right)
               | KdLeaf {ii,axis}           => List.app (fn i => f (i, p i)) ii
     in
-        appi' T
+        List.app appi' T
     end
 
 
 fun foldl f init {P,T} =
     let
         val p = S.point P
-        fun foldl' init T =
-            case T of 
+        fun foldl' init t =
+            case t of 
                 KdNode {left,i,right,axis} => 
                 (let val init' = foldl' init left
                      val init''= f (p i, init')
                  in foldl' init'' right end)
-              | KdLeaf {ii,axis}           => 
+              | KdLeaf {ii,axis} => 
                 List.foldl (fn (i,ax) => f (p i, ax)) init ii
     in
-        foldl' init T
+        List.foldl (fn (t, ax) => foldl' ax t) init T
     end
 
 
@@ -386,7 +387,7 @@ fun foldli f init {P,T} =
               | KdLeaf {ii,axis}           => 
                 List.foldl (fn (i,ax) => f (i, p i, ax)) init ii
     in
-        foldli' init T
+        List.foldl (fn (t, ax) => foldli' ax t) init T
     end
                                           
 
@@ -402,7 +403,7 @@ fun foldr f init {P,T} =
               | KdLeaf {ii,axis}           => 
                 List.foldr (fn (i,ax) => f (p i, ax)) init ii
     in
-        foldr' init T
+        List.foldr (fn (t, ax) => foldr' ax t) init T
     end
 
 
@@ -418,7 +419,7 @@ fun foldri f init {P,T} =
               | KdLeaf {ii,axis}           => 
                 List.foldr (fn (i,ax) => f (i, p i, ax)) init ii
     in
-        foldri' init T
+        List.foldr (fn(t, ax) => foldri' ax t) init T
     end
 
 
@@ -433,7 +434,7 @@ fun ifoldr f init {P,T} =
               | KdLeaf {ii,axis}           => 
                 List.foldr (fn (i,ax) => f (i, ax)) init ii
     in
-        foldr' init T
+        List.foldr (fn(t, ax) => foldr' ax t) init T
     end
 
 
@@ -445,30 +446,36 @@ fun toIndexList t = ifoldr (op ::) [] t
 
 fun subtrees {P,T} =
     let
-        fun subtrees' T = 
-            case T of 
+        fun subtrees' t ax = 
+            case t of 
                 KdNode {left,i,right,axis} => 
-                (subtrees' left) @ [T] @ (subtrees' right)
+                (subtrees' left) @ [t] @ (subtrees' right) @ ax
               | KdLeaf {ii,axis}           => 
-                [T]
+                t :: ax
     in
-        subtrees' T
+        List.foldl (fn(t, ax) => subtrees' t ax) T
     end
 
 
 fun isValid {P,T} =
-    case T of
-        KdLeaf _ => true
-      | KdNode {left,i,right,axis} =>
-        let
-            val x          = S.pointCoord P (i, axis)
-            val leftValid  = (List.all (fn y => Real.< (S.coord y axis, x))
-                                       (toList {P=P,T=left}))
-            val rightValid = (List.all (fn y => Real.>= (S.coord y axis, x))
-                                       (toList {P=P,T=right}))
-        in
-            leftValid andalso rightValid
-        end
+    let
+        fun isValid t =
+            case t of
+                KdLeaf _ => true
+              | KdNode {left,i,right,axis} =>
+                let
+                    val x          = S.pointCoord P (i, axis)
+                    val leftValid  = (List.all (fn y => Real.< (S.coord y axis, x))
+                                               (toList {P=P,T=left}))
+                    val rightValid = (List.all (fn y => Real.>= (S.coord y axis, x))
+                                               (toList {P=P,T=right}))
+                in
+                    leftValid andalso rightValid
+                end
+    in
+        List.all isValid T
+    end
+
 
 (* Checks whether the K-D tree property holds for the given tree and its subtreees *)
 
@@ -571,56 +578,7 @@ fun fromPointsWithDepth P I depth =
                                    else raise IndexArray)
     end
     
-   fun fromPoints P = {P=P,T=(fromPointsWithDepth P NONE 0)}
-
-   fun addPointWithDepth {P,T} point depth = 
-       let
-           val (P',pidx)    = S.insert (point, P)
-           val sz           = S.size P'
-           val bucketSize   = 10 * (Int.max (Real.ceil (Math.log10 (Real.fromInt sz)),  1))
-
-           val pointCoord'  = S.pointCoord P'
-
-           fun merge (axis,cp,p,xs,ys) = 
-               case ys of 
-                   [] => p::xs
-                 | (y::rest) =
-                   if Real.>(cp, pointCoord' (y,axis))
-                   then merge (cp,p,y::xs,rest)
-                   else (let val xs' = p::xs
-                         in List.revAppend(xs',ys)
-                         end)
-
-               
-       in
-           case T of
-               KdLeaf {ii,axis,median} => 
-               if List.null ii
-               then KdLeaf {ii=[pidx],axis=axis,median=(S.coord point axis)}
-               else
-                   (let 
-                       val pcx = S.coord point axis
-                       val ii' = merge (axis,pcx,point,[],ii)
-                       val median' = 
-                   in
-                       if (List.length ii') < bucketSize 
-                       then KdLeaf {ii=ii',axis=axis}
-                       else (let val axis' = Int.mod (axis+1, K)
-                             in 
-                                 case findMedian (fn(x) => pointCoord' (x,axis)) ii' of
-                                     SOME (l,m::r) => KdNode {left=ListMergeSort.sort (coordGt axis') l,
-                                                              i=m,right=ListMergeSort.sort (coordGt axis') r,
-                                                              axis=axis}
-                                   | NONE => KdLeaf {ii=List.revAppend(xs,ys),axis=axis}
-                             end)
-                   end)
-         | KdNode {left,i,right,axis} => 
-           let
-               val pcx = S.coord point axis
-               val icx = S.pointCoord' (i, axis)
-           in
-               
-           end
+   fun fromPoints P = {P=P,T=[(fromPointsWithDepth P NONE 0)]}
 
    (* Returns the index of the nearest neighbor of p in tree t. *)
 
