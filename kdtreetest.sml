@@ -1,4 +1,11 @@
 
+fun putStr str =
+    (TextIO.output (TextIO.stdOut, str))
+
+fun putStrLn str =
+    (TextIO.output (TextIO.stdOut, str);
+     TextIO.output (TextIO.stdOut, "\n"))
+
 fun timing (action) = 
     let
         val timer = Timer.startCPUTimer ()
@@ -41,9 +48,12 @@ struct
 
            
    fun check (t)  = 
-       (if not ((List.length (KDTree.toList t)) = (KDTree.size t)) then raise Fail "invalid KDTree size" else ();
+       (putStrLn ("check: size t = " ^ (Int.toString (KDTree.size t)));
+        putStrLn ("check: length (toList t) = " ^ (Int.toString (List.length (KDTree.toList t))));
+        if not ((List.length (KDTree.toList t)) = (KDTree.size t)) then raise Fail "invalid KDTree size" else ();
         if not (KDTree.isValid t) then raise Fail "invalid KDTree" else ();
-        if not (KDTree.allSubtreesAreValid t) then raise Fail "invalid subtree of a KDTree" else ())
+        if not (KDTree.allSubtreesAreValid t) then raise Fail "invalid subtree of a KDTree" else ()
+       )
 
 
    fun testNearestNeighbor (sorted,t,x) =
@@ -145,7 +155,13 @@ val _ = print ("constructing tensor tree...\n")
 val (tt,ti)  = timing (fn () => TensorKDTree.fromPoints P)
 val _ = print ("tensor tree constructed (" ^ (Time.toString ti) ^ " s)\n")
 
-val _ = print ("constructing map tree...\n")
+val _ = print ("constructing map tree (addPoint)...\n")
+val ((_,mt2),ti)  = timing (fn () => foldl (fn(p,(n,ax)) => 
+                                               (n+1,MapKDTree.addPoint (128,512) (p,ax)))
+                                           (0,MapKDTree.empty) pts)
+val _ = print ("map tree constructed (" ^ (Time.toString ti) ^ " s)\n")
+
+val _ = print ("constructing map tree (fromPoints)...\n")
 val (mt,ti)  = timing (fn () => MapKDTree.fromPoints PM)
 val _ = print ("map tree constructed (" ^ (Time.toString ti) ^ " s)\n")
 
@@ -157,6 +173,9 @@ val _ = print ("length of tree list = " ^ (Int.toString (List.length (TensorKDTr
 
 val _  = TensorKdTreeTest.check tt
 val _ = print "tensor tree consistency check passed\n"
+
+val _  = MapKdTreeTest.check mt2
+val _ = print "map tree consistency check passed\n"
 
 val _  = MapKdTreeTest.check mt
 val _ = print "map tree consistency check passed\n"
@@ -180,10 +199,14 @@ val _  = let  fun recur (i) =
                         val _       = print ("(tensor tree) nearest neighbor check passed (" ^ (Time.toString ti) ^ " s)\n")
                         val (_,ti)  = timing (fn () => MapKdTreeTest.testNearestNeighbor (sorted,mt,x))
                         val _       = print ("(map tree) nearest neighbor check passed (" ^ (Time.toString ti) ^ " s)\n")
+                        val (_,ti)  = timing (fn () => MapKdTreeTest.testNearestNeighbor (sorted,mt2,x))
+                        val _       = print ("(dynamic map tree) nearest neighbor check passed (" ^ (Time.toString ti) ^ " s)\n")
                         val (_,ti)  = timing (fn () => TensorKdTreeTest.testNearNeighbors (sorted,tt,x,0.3))
                         val _       = print ("(tensor tree) near neighbors check passed (" ^ (Time.toString ti) ^ "s)\n")
                         val (_,ti)  = timing (fn () => MapKdTreeTest.testNearNeighbors (sorted,mt,x,0.3))
                         val _       = print ("(map tree) near neighbors check passed (" ^ (Time.toString ti) ^ "s)\n")
+                        val (_,ti)  = timing (fn () => MapKdTreeTest.testNearNeighbors (sorted,mt2,x,0.3))
+                        val _       = print ("(dynamic map tree) near neighbors check passed (" ^ (Time.toString ti) ^ "s)\n")
                     in 
                         recur (i-1)
                     end)
